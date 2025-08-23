@@ -95,6 +95,79 @@ setting the corresponding environment variables before invoking the
 action. The shell action enforces `.gitreview` for the composite
 variant; this Python action mirrors that behavior for compatibility.
 
+## Command Line Usage and Debugging
+
+### Direct Command Line Usage
+
+You can run the tool directly from the command line to process GitHub pull requests:
+
+```bash
+# Process a specific pull request
+github2gerrit https://github.com/owner/repo/pull/123
+
+# Process all open pull requests in a repository
+github2gerrit https://github.com/owner/repo
+
+# Run in CI mode (reads from environment variables)
+github2gerrit
+```
+
+### Available Options
+
+```bash
+github2gerrit --help
+```
+
+Key options include:
+
+- `--verbose` / `-v`: Enable verbose debug logging
+- `--dry-run`: Check configuration without making changes
+- `--submit-single-commits`: Submit each commit individually
+- `--use-pr-as-commit`: Use PR title/body as commit message
+- `--preserve-github-prs`: Don't close GitHub PRs after submission
+
+### Debugging and Troubleshooting
+
+When encountering issues, enable verbose logging to see detailed execution:
+
+```bash
+# Using the CLI flag
+github2gerrit --verbose https://github.com/owner/repo/pull/123
+
+# Using environment variable
+G2G_LOG_LEVEL=DEBUG github2gerrit https://github.com/owner/repo/pull/123
+
+# Alternative environment variable
+G2G_VERBOSE=true github2gerrit https://github.com/owner/repo/pull/123
+```
+
+Debug output includes:
+
+- Git command execution and output
+- SSH connection attempts
+- Gerrit API interactions
+- Branch resolution logic
+- Change-Id processing
+
+Common issues and solutions:
+
+1. **SSH Permission Denied**: Ensure `GERRIT_SSH_PRIVKEY_G2G` and
+   `GERRIT_KNOWN_HOSTS` are properly set
+2. **Branch Not Found**: Check that the target branch exists in both GitHub and Gerrit
+3. **Change-Id Issues**: Enable debug logging to see Change-Id generation and validation
+4. **Gerrit API Errors**: Verify Gerrit server connectivity and project permissions
+
+### Environment Variables
+
+The tool respects these environment variables for configuration:
+
+- `G2G_LOG_LEVEL`: Set to `DEBUG` for verbose output (default: `INFO`)
+- `G2G_VERBOSE`: Set to `true` to enable debug logging
+- `GERRIT_SSH_PRIVKEY_G2G`: SSH private key content
+- `GERRIT_KNOWN_HOSTS`: SSH known hosts entries
+- `GERRIT_SSH_USER_G2G`: Gerrit SSH username
+- `DRY_RUN`: Set to `true` for check mode
+
 ## Advanced usage
 
 You can explicitly install the SSH key and provide a custom SSH configuration
