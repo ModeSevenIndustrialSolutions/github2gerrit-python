@@ -50,6 +50,7 @@ class Inputs:
     gerrit_server: str
     gerrit_server_port: str
     gerrit_project: str
+    issue_id: str
 
 
 @dataclass(frozen=True)

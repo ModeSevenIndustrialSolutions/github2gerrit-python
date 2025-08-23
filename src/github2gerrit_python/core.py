@@ -67,6 +67,53 @@ from .models import Inputs
 
 log = logging.getLogger("github2gerrit.core")
 
+
+def _insert_issue_id_into_commit_message(message: str, issue_id: str) -> str:
+    """
+    Insert Issue ID into commit message after the first line.
+
+    Format:
+    Title line
+
+    Issue-ID: CIMAN-33
+
+    Rest of body...
+    """
+    if not issue_id.strip():
+        return message
+
+    # Validate that Issue ID is a single line string
+    cleaned_issue_id = issue_id.strip()
+    if "\n" in cleaned_issue_id or "\r" in cleaned_issue_id:
+        raise ValueError("Issue ID must be single line")  # noqa: TRY003
+
+    # Use the cleaned issue ID for insertion
+    issue_line = cleaned_issue_id
+
+    lines = message.splitlines()
+    if not lines:
+        return message
+
+    # Take the first line as title
+    title = lines[0]
+
+    # Build new message with Issue ID on third line
+    new_lines = [title, "", issue_line]
+
+    # Add rest of the body if it exists
+    if len(lines) > 1:
+        # Skip empty lines immediately after title to avoid double spacing
+        body_start = 1
+        while body_start < len(lines) and not lines[body_start].strip():
+            body_start += 1
+
+        if body_start < len(lines):
+            new_lines.append("")  # Empty line before body
+            new_lines.extend(lines[body_start:])
+
+    return "\n".join(new_lines)
+
+
 # ---------------------
 # Utility functions
 # ---------------------
@@ -796,8 +843,10 @@ Host *
                 reuse_cid = ""
         # Compose final commit message
         commit_msg = "\n".join(message_lines).strip()
-        # Add Issue-ID for ONAP compliance (testing)
-        commit_msg += "\n\nIssue-ID: CIMAN-33"
+        # Add Issue-ID if provided
+        commit_msg = _insert_issue_id_into_commit_message(
+            commit_msg, inputs.issue_id
+        )
         if signed_off:
             commit_msg += "\n\n" + "\n".join(signed_off)
         if reuse_cid:
@@ -884,8 +933,15 @@ Host *
             if ln.startswith("Signed-off-by:")
         ]
         msg_parts = [title, "", body] if title or body else [current_body]
+        commit_message = "\n".join(msg_parts).strip()
+
+        # Add Issue-ID if provided
+        commit_message = _insert_issue_id_into_commit_message(
+            commit_message, inputs.issue_id
+        )
+
         if signed:
-            msg_parts += ["", *signed]
+            commit_message += "\n\n" + "\n".join(signed)
         author = run_cmd(
             ["git", "show", "-s", "--pretty=format:%an <%ae>", "HEAD"]
         ).stdout.strip()
@@ -893,7 +949,7 @@ Host *
             no_edit=False,
             signoff=not bool(signed),
             author=author,
-            message="\n".join(msg_parts).strip(),
+            message=commit_message,
         )
 
     def _push_to_gerrit(
@@ -936,8 +992,8 @@ Host *
             ]
             for r in revs:
                 args.extend(["--reviewer", r])
-            # Branch is positional argument at the end
-            args.append(branch)
+            # Branch flag
+            args.extend(["-b", branch])
             run_cmd(args, cwd=self.workspace)
         except CommandError as exc:
             msg = f"Failed to push changes to Gerrit with git-review: {exc}"
@@ -1086,7 +1142,7 @@ Host *
             if gh.run_id
             else "N/A"
         )
-        message = f"GHPR: {pr_url} Action-Run: {run_url}"
+        message = f"GHPR: {pr_url}\nAction-Run: {run_url}\n"
         for csha in commit_shas:
             if not csha:
                 continue

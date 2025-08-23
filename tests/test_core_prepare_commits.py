@@ -31,6 +31,7 @@ def _minimal_inputs() -> Inputs:
         gerrit_server="gerrit.example.org",
         gerrit_server_port="29418",
         gerrit_project="example/project",
+        issue_id="",
     )
 
 
