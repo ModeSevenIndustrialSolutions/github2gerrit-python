@@ -401,6 +401,9 @@ def _process() -> None:
 
             if all_urls:
                 os.environ["GERRIT_CHANGE_REQUEST_URL"] = "\n".join(all_urls)
+                # Output Gerrit change URL(s) to console
+                for url in all_urls:
+                    log.info("Gerrit change URL: %s", url)
             if all_nums:
                 os.environ["GERRIT_CHANGE_REQUEST_NUM"] = "\n".join(all_nums)
 
@@ -552,6 +555,9 @@ def _process() -> None:
             os.environ["GERRIT_CHANGE_REQUEST_URL"] = "\n".join(
                 result.change_urls
             )
+            # Output Gerrit change URL(s) to console
+            for url in result.change_urls:
+                log.info("Gerrit change URL: %s", url)
         if result.change_numbers:
             os.environ["GERRIT_CHANGE_REQUEST_NUM"] = "\n".join(
                 result.change_numbers

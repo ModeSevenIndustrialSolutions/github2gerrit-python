@@ -721,6 +721,61 @@ Host *
                 message_lines.append(ln)
         # Deduplicate Signed-off-by
         signed_off = sorted(set(signed_off))
+
+        # Clean up message lines to ensure proper title/body separation
+        # The first non-empty line should be the title, clean and concise
+        clean_message_lines: list[str] = []
+        if message_lines:
+            # Extract the first line as title and clean it up
+            title_line = message_lines[0].strip()
+            # Remove any markdown links or extra formatting from title
+            # Remove markdown links like [text](url) and keep just the text
+            title_line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", title_line)
+            # Remove any trailing punctuation that might be malformed
+            title_line = re.sub(r"\s*[.]{3,}.*$", "", title_line)
+            # Ensure title doesn't accidentally contain body content
+            # Split on common separators and take only the first meaningful part
+            for separator in [". Bumps ", " Bumps ", ". - ", " - "]:
+                if separator in title_line:
+                    title_line = title_line.split(separator)[0].strip()
+                    break
+            # Remove any remaining markdown or formatting artifacts
+            title_line = re.sub(r"[*_`]", "", title_line)
+            # Ensure title doesn't contain body content by truncating at
+            # sensible boundaries
+            if len(title_line) > 100:  # Reasonable title length limit
+                # Find a good breaking point (space, punctuation)
+                break_points = [". ", "! ", "? ", " - ", ": "]
+                for bp in break_points:
+                    if bp in title_line[:100]:
+                        title_line = title_line[
+                            : title_line.index(bp) + len(bp.strip())
+                        ]
+                        break
+                else:
+                    # No good break point found, truncate at word boundary
+                    words = title_line[:100].split()
+                    if len(words) > 1:
+                        title_line = " ".join(words[:-1])
+                    else:
+                        title_line = title_line[:100].rstrip()
+
+            clean_message_lines.append(title_line)
+
+            # Add the rest as body if there are more lines
+            if len(message_lines) > 1:
+                # Skip empty lines immediately after title
+                body_start = 1
+                while (
+                    body_start < len(message_lines)
+                    and not message_lines[body_start].strip()
+                ):
+                    body_start += 1
+                if body_start < len(message_lines):
+                    clean_message_lines.append("")  # Empty line separator
+                    clean_message_lines.extend(message_lines[body_start:])
+
+        message_lines = clean_message_lines
         # Reuse Change-Id if PR reopened/synchronized and prior CID exists
         pr = str(gh.pr_number or "").strip()
         reuse_cid = ""
@@ -804,6 +859,23 @@ Host *
         title, body = get_pr_title_body(pr_obj)
         title = (title or "").strip()
         body = (body or "").strip()
+
+        # Clean up title to ensure it's a proper first line for commit message
+        if title:
+            # Remove markdown links like [text](url) and keep just the text
+            title = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", title)
+            # Remove any trailing ellipsis or truncation indicators
+            title = re.sub(r"\s*[.]{3,}.*$", "", title)
+            # Ensure title doesn't accidentally contain body content
+            # Split on common separators and take only the first meaningful part
+            for separator in [". Bumps ", " Bumps ", ". - ", " - "]:
+                if separator in title:
+                    title = title.split(separator)[0].strip()
+                    break
+            # Remove any remaining markdown or formatting artifacts
+            title = re.sub(r"[*_`]", "", title)
+            title = title.strip()
+
         # Compose message; preserve any Signed-off-by lines
         current_body = git_show("HEAD", fmt="%B")
         signed = [
