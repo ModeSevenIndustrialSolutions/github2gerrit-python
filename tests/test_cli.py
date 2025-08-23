@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
 
 from github2gerrit_python.cli import app
@@ -101,9 +100,6 @@ def test_parses_pr_number_and_returns_zero(tmp_path: Path) -> None:
     assert "Validation complete" in (result.stdout + result.stderr)
 
 
-@pytest.mark.skip(  # type: ignore[misc]
-    reason="Flaky in CI due to incidental GitHub API calls when no PR context"
-)
 def test_no_pr_context_exits_2(tmp_path: Path) -> None:
     env = _base_env(tmp_path)
     # Overwrite event to remove PR number

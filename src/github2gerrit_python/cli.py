@@ -80,13 +80,11 @@ def main(
     submit_single_commits: bool = typer.Option(
         False,
         "--submit-single-commits",
-        envvar="SUBMIT_SINGLE_COMMITS",
         help="Submit one commit at a time to the Gerrit repository.",
     ),
     use_pr_as_commit: bool = typer.Option(
         False,
         "--use-pr-as-commit",
-        envvar="USE_PR_AS_COMMIT",
         help="Use PR title and body as the commit message.",
     ),
     fetch_depth: int = typer.Option(
@@ -167,6 +165,12 @@ def main(
         envvar="GERRIT_PROJECT",
         help="Gerrit project (optional; .gitreview preferred).",
     ),
+    issue_id: str = typer.Option(
+        "",
+        "--issue-id",
+        envvar="ISSUE_ID",
+        help="Issue ID to include in commit message (e.g., Issue-ID: ABC-123).",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -186,6 +190,7 @@ def main(
         os.environ["G2G_LOG_LEVEL"] = "DEBUG"
         _reconfigure_logging()
     # Normalize CLI options into environment for unified processing.
+    # For boolean flags, only set if explicitly provided via CLI
     if submit_single_commits:
         os.environ["SUBMIT_SINGLE_COMMITS"] = "true"
     if use_pr_as_commit:
@@ -215,6 +220,8 @@ def main(
         os.environ["GERRIT_SERVER_PORT"] = gerrit_server_port
     if gerrit_project:
         os.environ["GERRIT_PROJECT"] = gerrit_project
+    if issue_id:
+        os.environ["ISSUE_ID"] = issue_id
     # URL mode handling
     if target_url:
         org, repo, pr = _parse_github_target(target_url)
@@ -293,6 +300,7 @@ def _build_inputs_from_env() -> Inputs:
         gerrit_server=_env_str("GERRIT_SERVER", ""),
         gerrit_server_port=_env_str("GERRIT_SERVER_PORT", "29418"),
         gerrit_project=_env_str("GERRIT_PROJECT", ""),
+        issue_id=_env_str("ISSUE_ID", ""),
     )
 
 
@@ -336,6 +344,7 @@ def _process() -> None:
                     gerrit_server=data.gerrit_server,
                     gerrit_server_port=data.gerrit_server_port,
                     gerrit_project=data.gerrit_project,
+                    issue_id=data.issue_id,
                 )
                 log.info("Derived reviewers: %s", data.reviewers_email)
         except Exception as exc:
@@ -366,11 +375,6 @@ def _process() -> None:
         client = build_client()
         repo = get_repo_from_env(client)
 
-        # Create temporary directory for git operations
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workspace = Path(temp_dir)
-            orch = Orchestrator(workspace=workspace)
-
         all_urls: list[str] = []
         all_nums: list[str] = []
 
@@ -393,36 +397,40 @@ def _process() -> None:
                 pr_number=pr_number,
             )
 
-            result_multi = orch.execute(inputs=data, gh=per_ctx)
-            if result_multi.change_urls:
-                all_urls.extend(result_multi.change_urls)
-            if result_multi.change_numbers:
-                all_nums.extend(result_multi.change_numbers)
+            # Create temporary directory for git operations per PR
+            with tempfile.TemporaryDirectory() as temp_dir:
+                workspace = Path(temp_dir)
+                orch = Orchestrator(workspace=workspace)
+                result_multi = orch.execute(inputs=data, gh=per_ctx)
+                if result_multi.change_urls:
+                    all_urls.extend(result_multi.change_urls)
+                if result_multi.change_numbers:
+                    all_nums.extend(result_multi.change_numbers)
 
-            if all_urls:
-                os.environ["GERRIT_CHANGE_REQUEST_URL"] = "\n".join(all_urls)
-                # Output Gerrit change URL(s) to console
-                for url in all_urls:
-                    log.info("Gerrit change URL: %s", url)
-            if all_nums:
-                os.environ["GERRIT_CHANGE_REQUEST_NUM"] = "\n".join(all_nums)
+        if all_urls:
+            os.environ["GERRIT_CHANGE_REQUEST_URL"] = "\n".join(all_urls)
+            # Output Gerrit change URL(s) to console
+            for url in all_urls:
+                log.info("Gerrit change URL: %s", url)
+        if all_nums:
+            os.environ["GERRIT_CHANGE_REQUEST_NUM"] = "\n".join(all_nums)
 
-            # Also write outputs to GITHUB_OUTPUT if available
-            gh_out = os.getenv("GITHUB_OUTPUT")
-            if gh_out:
-                try:
-                    with open(gh_out, "a", encoding="utf-8") as fh:
-                        v = os.getenv("GERRIT_CHANGE_REQUEST_URL", "")
-                        if v:
-                            fh.write(f"gerrit_change_request_url={v}\n")
-                        v = os.getenv("GERRIT_CHANGE_REQUEST_NUM", "")
-                        if v:
-                            fh.write(f"gerrit_change_request_num={v}\n")
-                except Exception as exc:
-                    log.debug("Failed to write GITHUB_OUTPUT: %s", exc)
+        # Also write outputs to GITHUB_OUTPUT if available
+        gh_out = os.getenv("GITHUB_OUTPUT")
+        if gh_out:
+            try:
+                with open(gh_out, "a", encoding="utf-8") as fh:
+                    v = os.getenv("GERRIT_CHANGE_REQUEST_URL", "")
+                    if v:
+                        fh.write(f"gerrit_change_request_url={v}\n")
+                    v = os.getenv("GERRIT_CHANGE_REQUEST_NUM", "")
+                    if v:
+                        fh.write(f"gerrit_change_request_num={v}\n")
+            except Exception as exc:
+                log.debug("Failed to write GITHUB_OUTPUT: %s", exc)
 
-            log.info("Submission pipeline complete (multi-PR).")
-            return
+        log.info("Submission pipeline complete (multi-PR).")
+        return
 
     if not gh.pr_number:
         log.error(
@@ -686,6 +694,10 @@ def _validate_inputs(data: Inputs) -> None:
     if data.fetch_depth <= 0:
         log.error("Invalid FETCH_DEPTH: %s", data.fetch_depth)
         raise typer.BadParameter("FETCH_DEPTH must be a positive integer")  # noqa: TRY003
+
+    # Validate Issue ID is a single line string if provided
+    if data.issue_id and ("\n" in data.issue_id or "\r" in data.issue_id):
+        raise typer.BadParameter("Issue ID must be single line")  # noqa: TRY003
 
 
 def _log_effective_config(data: Inputs, gh: GitHubContext) -> None:

@@ -39,7 +39,8 @@ def _minimal_inputs() -> Inputs:
         dry_run=False,
         gerrit_server="gerrit.example.org",
         gerrit_server_port="29418",
-        gerrit_project="example/repo",  # not used by tests here
+        gerrit_project="example/project",
+        issue_id="",
     )
 
 

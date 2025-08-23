@@ -157,12 +157,29 @@ def test_multi_pr_url_mode_writes_aggregated_outputs(
 
     # Validate aggregated outputs in $GITHUB_OUTPUT
     content = outputs_file.read_text(encoding="utf-8").splitlines()
-    # Collect last seen values for each key (the CLI appends lines)
+    # Parse multi-line GitHub Output format where values can span multiple lines
     mapping: dict[str, str] = {}
+    current_key = None
+    current_value_lines = []
+
     for line in content:
         if "=" in line:
+            # If we were building a multi-line value, save it first
+            if current_key:
+                mapping[current_key] = "\n".join(current_value_lines)
+
+            # Start new key-value pair
             k, v = line.split("=", 1)
-            mapping[k.strip()] = v
+            current_key = k.strip()
+            current_value_lines = [v] if v else []
+        else:
+            # This line is a continuation of the current value
+            if current_key:
+                current_value_lines.append(line)
+
+    # Don't forget the last key-value pair
+    if current_key:
+        mapping[current_key] = "\n".join(current_value_lines)
 
     # The CLI aggregates newline-separated values for multiple PRs
     # Ensure both PR 5 and 7 are present in the respective outputs
