@@ -163,6 +163,7 @@ jobs:
         with:
           environment: 'development'
           tag: "${{ needs.tag-validate.outputs.tag }}"
+          pypi_credential: "${{ secrets.TEST_PYPI_CREDENTIAL }}"
 
   pypi:
     name: 'Release PyPI Package'
@@ -193,14 +194,47 @@ jobs:
           environment: 'production'
           attestations: true
           tag: "${{ needs.tag-validate.outputs.tag }}"
+          pypi_credential: "${{ secrets.PYPI_CREDENTIAL }}"
+
+  release-check:
+    name: 'Check Release Status'
+    runs-on: 'ubuntu-latest'
+    needs: 'tag-validate'
+    permissions:
+      contents: read
+    timeout-minutes: 1
+    outputs:
+      should_promote: "${{ steps.check.outputs.should_promote }}"
+    steps:
+      # Harden the runner used by this workflow
+      # yamllint disable-line rule:line-length
+      - uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: 'audit'
+
+      - name: 'Check if release exists'
+        id: 'check'
+        shell: bash
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        run: |
+          TAG="${{ needs.tag-validate.outputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "should_promote=false" >> "$GITHUB_OUTPUT"
+            echo "Release already exists for tag $TAG, skipping promotion"
+          else
+            echo "should_promote=true" >> "$GITHUB_OUTPUT"
+            echo "No release found for tag $TAG, will proceed with promotion"
+          fi
 
   promote-release:
     name: 'Promote Draft Release'
     # yamllint disable-line rule:line-length
-    if: startsWith(github.ref, 'refs/tags/')
+    if: needs.release-check.outputs.should_promote == 'true'
     needs:
       - 'tag-validate'
       - 'pypi'
+      - 'release-check'
     runs-on: 'ubuntu-latest'
     permissions:
       contents: write # IMPORTANT: needed to edit a draft release and promote it
@@ -236,6 +270,9 @@ jobs:
       - 'tag-validate'
       - 'python-build'
       - 'promote-release'
+      - 'release-check'
+    # yamllint disable-line rule:line-length
+    if: always() && (needs.promote-release.result == 'success' || needs.promote-release.result == 'skipped')
     permissions:
       contents: write # IMPORTANT: needed to edit release, attach artefacts
     timeout-minutes: 5
