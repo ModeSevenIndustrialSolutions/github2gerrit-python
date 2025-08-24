@@ -30,6 +30,7 @@ import logging
 import os
 import re
 import stat
+import urllib.parse
 import urllib.request
 from collections.abc import Iterable
 from collections.abc import Sequence
@@ -1344,7 +1345,7 @@ class Orchestrator:
             if gh.run_id
             else "N/A"
         )
-        message = f"GHPR: {pr_url}\\nAction-Run: {run_url}"
+        message = f"GHPR: {pr_url}\nAction-Run: {run_url}"
         for csha in commit_shas:
             if not csha:
                 continue
