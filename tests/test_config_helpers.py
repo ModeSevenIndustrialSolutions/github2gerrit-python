@@ -8,15 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from github2gerrit_python.config import _coerce_value
-from github2gerrit_python.config import _expand_env_refs
-from github2gerrit_python.config import _normalize_bool_like
-from github2gerrit_python.config import _select_section
-from github2gerrit_python.config import _strip_quotes
-from github2gerrit_python.config import apply_config_to_env
-from github2gerrit_python.config import filter_known
-from github2gerrit_python.config import load_org_config
-from github2gerrit_python.config import overlay_missing
+from github2gerrit.config import _coerce_value
+from github2gerrit.config import _expand_env_refs
+from github2gerrit.config import _normalize_bool_like
+from github2gerrit.config import _select_section
+from github2gerrit.config import _strip_quotes
+from github2gerrit.config import apply_config_to_env
+from github2gerrit.config import filter_known
+from github2gerrit.config import load_org_config
+from github2gerrit.config import overlay_missing
 
 
 def test_expand_env_refs_expands_present_vars(

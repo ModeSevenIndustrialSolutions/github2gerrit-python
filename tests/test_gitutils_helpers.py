@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from github2gerrit_python.gitutils import CommandError
-from github2gerrit_python.gitutils import CommandResult
-from github2gerrit_python.gitutils import git
-from github2gerrit_python.gitutils import mask_text
-from github2gerrit_python.gitutils import run_cmd
-from github2gerrit_python.gitutils import run_cmd_with_retries
+from github2gerrit.gitutils import CommandError
+from github2gerrit.gitutils import CommandResult
+from github2gerrit.gitutils import git
+from github2gerrit.gitutils import mask_text
+from github2gerrit.gitutils import run_cmd
+from github2gerrit.gitutils import run_cmd_with_retries
 
 
 def _no_cov_env() -> dict[str, str]:
@@ -164,7 +164,7 @@ def test_git_retries_on_transient_error_then_succeeds(
         return CommandResult(returncode=0, stdout="ok", stderr="")
 
     # Patch the low-level executor used by run_cmd_with_retries
-    monkeypatch.setattr("github2gerrit_python.gitutils.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("github2gerrit.gitutils.run_cmd", fake_run_cmd)
 
     # Invoke the git wrapper; it should retry and then succeed
     res = git(["fetch", "origin"])
@@ -182,7 +182,7 @@ def test_git_raises_on_non_transient_error(
             returncode=2, stdout="", stderr="permanent failure"
         )
 
-    monkeypatch.setattr("github2gerrit_python.gitutils.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("github2gerrit.gitutils.run_cmd", fake_run_cmd)
 
     with pytest.raises(CommandError):
         git(["fetch", "origin"])
@@ -204,7 +204,7 @@ def test_run_cmd_with_retries_retries_on_http2_stream_then_succeeds(
             )
         return CommandResult(returncode=0, stdout="ok", stderr="")
 
-    monkeypatch.setattr("github2gerrit_python.gitutils.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("github2gerrit.gitutils.run_cmd", fake_run_cmd)
 
     res = run_cmd_with_retries(["git", "fetch", "origin"])
     assert res.returncode == 0
@@ -216,7 +216,7 @@ def test_git_last_commit_trailers_parsing_edge_cases(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Patch git_show to return a crafted commit message body with various trailer forms.
-    import github2gerrit_python.gitutils as gitutils
+    import github2gerrit.gitutils as gitutils
 
     body = (
         "Subject line\n\n"
@@ -260,7 +260,7 @@ def test_git_quiet_suppresses_failure_logging(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Test that git_quiet doesn't log failures like regular git commands do."""
-    from github2gerrit_python.gitutils import git_quiet
+    from github2gerrit.gitutils import git_quiet
 
     # Mock run_cmd to simulate a command failure
     def fake_run_cmd(cmd: list[str], **kwargs: object) -> CommandResult:
@@ -268,7 +268,7 @@ def test_git_quiet_suppresses_failure_logging(
             returncode=1, stdout="", stderr="config key not found"
         )
 
-    monkeypatch.setattr("github2gerrit_python.gitutils.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("github2gerrit.gitutils.run_cmd", fake_run_cmd)
 
     # Clear any existing log messages
     caplog.clear()

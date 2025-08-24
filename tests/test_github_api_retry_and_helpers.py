@@ -9,7 +9,7 @@ from typing import cast
 
 import pytest
 
-from github2gerrit_python import github_api as ghapi
+from github2gerrit import github_api as ghapi
 
 
 def _placeholder_non_test() -> None:

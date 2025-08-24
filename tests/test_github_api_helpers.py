@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from github2gerrit_python import github_api as ghapi
+from github2gerrit import github_api as ghapi
 
 
 def test_build_client_uses_env_token_and_returns_dummy(

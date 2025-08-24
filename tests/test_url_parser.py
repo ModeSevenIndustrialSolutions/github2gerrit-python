@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from github2gerrit_python.cli import _parse_github_target
+from github2gerrit.cli import _parse_github_target
 
 
 @pytest.mark.parametrize(  # type: ignore[misc]

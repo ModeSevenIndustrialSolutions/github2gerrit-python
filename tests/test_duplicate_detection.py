@@ -13,11 +13,11 @@ from unittest.mock import patch
 
 import pytest
 
-from github2gerrit_python.duplicate_detection import ChangeFingerprint
-from github2gerrit_python.duplicate_detection import DuplicateChangeError
-from github2gerrit_python.duplicate_detection import DuplicateDetector
-from github2gerrit_python.duplicate_detection import check_for_duplicates
-from github2gerrit_python.models import GitHubContext
+from github2gerrit.duplicate_detection import ChangeFingerprint
+from github2gerrit.duplicate_detection import DuplicateChangeError
+from github2gerrit.duplicate_detection import DuplicateDetector
+from github2gerrit.duplicate_detection import check_for_duplicates
+from github2gerrit.models import GitHubContext
 
 
 class TestChangeFingerprint:
@@ -205,8 +205,8 @@ class TestCheckForDuplicatesFunction:
             pr_number=pr_number,
         )
 
-    @patch("github2gerrit_python.duplicate_detection.build_client")
-    @patch("github2gerrit_python.duplicate_detection.get_repo_from_env")
+    @patch("github2gerrit.duplicate_detection.build_client")
+    @patch("github2gerrit.duplicate_detection.get_repo_from_env")
     def test_check_for_duplicates_success(
         self, mock_get_repo: Any, mock_build_client: Any
     ) -> None:
@@ -225,8 +225,8 @@ class TestCheckForDuplicatesFunction:
         # Should not raise any exception
         check_for_duplicates(gh, allow_duplicates=False)
 
-    @patch("github2gerrit_python.duplicate_detection.build_client")
-    @patch("github2gerrit_python.duplicate_detection.get_repo_from_env")
+    @patch("github2gerrit.duplicate_detection.build_client")
+    @patch("github2gerrit.duplicate_detection.get_repo_from_env")
     def test_check_for_duplicates_no_pr_number(
         self, mock_get_repo: Any, mock_build_client: Any
     ) -> None:
@@ -239,8 +239,8 @@ class TestCheckForDuplicatesFunction:
         mock_build_client.assert_not_called()
         mock_get_repo.assert_not_called()
 
-    @patch("github2gerrit_python.duplicate_detection.build_client")
-    @patch("github2gerrit_python.duplicate_detection.get_repo_from_env")
+    @patch("github2gerrit.duplicate_detection.build_client")
+    @patch("github2gerrit.duplicate_detection.get_repo_from_env")
     def test_check_for_duplicates_api_failure_doesnt_crash(
         self, mock_get_repo: Any, mock_build_client: Any
     ) -> None:
@@ -387,7 +387,7 @@ project=test/project.git
             result = detector._resolve_gerrit_info_from_env_or_gitreview(gh)
             assert result == ("gerrit.example.org", "test/project")
 
-    @patch("github2gerrit_python.duplicate_detection.GerritRestAPI")
+    @patch("github2gerrit.duplicate_detection.GerritRestAPI")
     def test_check_gerrit_for_existing_change_found(
         self, mock_gerrit_api: Any
     ) -> None:
@@ -425,7 +425,7 @@ project=test/project.git
                 f"/changes/?q={expected_query}&n=10"
             )
 
-    @patch("github2gerrit_python.duplicate_detection.GerritRestAPI")
+    @patch("github2gerrit.duplicate_detection.GerritRestAPI")
     def test_check_gerrit_for_existing_change_not_found(
         self, mock_gerrit_api: Any
     ) -> None:
@@ -468,7 +468,7 @@ project=test/project.git
         result = detector.check_gerrit_for_existing_change(gh)
         assert result is False
 
-    @patch("github2gerrit_python.duplicate_detection.GerritRestAPI")
+    @patch("github2gerrit.duplicate_detection.GerritRestAPI")
     def test_check_gerrit_for_existing_change_api_error(
         self, mock_gerrit_api: Any
     ) -> None:
@@ -491,7 +491,7 @@ project=test/project.git
             result = detector.check_gerrit_for_existing_change(gh)
             assert result is False
 
-    @patch("github2gerrit_python.duplicate_detection.GerritRestAPI")
+    @patch("github2gerrit.duplicate_detection.GerritRestAPI")
     def test_check_for_duplicates_with_gerrit_duplicate(
         self, mock_gerrit_api: Any
     ) -> None:
@@ -527,7 +527,7 @@ project=test/project.git
                 exc_info.value
             )
 
-    @patch("github2gerrit_python.duplicate_detection.GerritRestAPI")
+    @patch("github2gerrit.duplicate_detection.GerritRestAPI")
     def test_check_for_duplicates_with_gerrit_duplicate_allowed(
         self, mock_gerrit_api: Any
     ) -> None:

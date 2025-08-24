@@ -8,10 +8,10 @@ from typing import Any
 
 import pytest
 
-from github2gerrit_python.core import Orchestrator
-from github2gerrit_python.gitutils import CommandResult
-from github2gerrit_python.models import GitHubContext
-from github2gerrit_python.models import Inputs
+from github2gerrit.core import Orchestrator
+from github2gerrit.gitutils import CommandResult
+from github2gerrit.models import GitHubContext
+from github2gerrit.models import Inputs
 
 
 def _minimal_inputs() -> Inputs:
@@ -111,14 +111,14 @@ def test_prepare_single_commits_collects_unique_change_ids(
         return CommandResult(returncode=0, stdout="", stderr="")
 
     # Patch core module symbols that are imported into core's namespace.
-    monkeypatch.setattr("github2gerrit_python.core.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("github2gerrit.core.run_cmd", fake_run_cmd)
 
     def fake_git_cherry_pick(csha: str, **kwargs: Any) -> None:
         # Success path; behavior validated through trailers below.
         assert csha in commits
 
     monkeypatch.setattr(
-        "github2gerrit_python.core.git_cherry_pick", fake_git_cherry_pick
+        "github2gerrit.core.git_cherry_pick", fake_git_cherry_pick
     )
 
     def fake_git_commit_amend(**kwargs: Any) -> None:
@@ -126,7 +126,7 @@ def test_prepare_single_commits_collects_unique_change_ids(
         pass
 
     monkeypatch.setattr(
-        "github2gerrit_python.core.git_commit_amend", fake_git_commit_amend
+        "github2gerrit.core.git_commit_amend", fake_git_commit_amend
     )
 
     # Use a mutable holder to return appropriate trailers for each commit pick
@@ -144,11 +144,11 @@ def test_prepare_single_commits_collects_unique_change_ids(
         return {"Change-Id": []}
 
     monkeypatch.setattr(
-        "github2gerrit_python.core.git_last_commit_trailers", fake_trailers
+        "github2gerrit.core.git_last_commit_trailers", fake_trailers
     )
 
     # Act
-    from github2gerrit_python.core import GerritInfo
+    from github2gerrit.core import GerritInfo
 
     gerrit = GerritInfo(
         host="gerrit.example.org", port=29418, project="example/project"
@@ -230,20 +230,18 @@ def test_prepare_squashed_commit_reuses_change_id_from_comments(
             )
         return CommandResult(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("github2gerrit_python.core.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("github2gerrit.core.run_cmd", fake_run_cmd)
 
     # GitHub API helpers used to fetch PR comments
+    monkeypatch.setattr("github2gerrit.core.build_client", lambda: object())
     monkeypatch.setattr(
-        "github2gerrit_python.core.build_client", lambda: object()
+        "github2gerrit.core.get_repo_from_env", lambda _c: object()
     )
     monkeypatch.setattr(
-        "github2gerrit_python.core.get_repo_from_env", lambda _c: object()
+        "github2gerrit.core.get_pull", lambda _repo, _num: object()
     )
     monkeypatch.setattr(
-        "github2gerrit_python.core.get_pull", lambda _repo, _num: object()
-    )
-    monkeypatch.setattr(
-        "github2gerrit_python.core.get_recent_change_ids_from_comments",
+        "github2gerrit.core.get_recent_change_ids_from_comments",
         lambda _pr, max_comments=50: ["Ix", reused_cid],
     )
 
@@ -257,10 +255,10 @@ def test_prepare_squashed_commit_reuses_change_id_from_comments(
         created["amend"] += 1
 
     monkeypatch.setattr(
-        "github2gerrit_python.core.git_commit_new", fake_git_commit_new
+        "github2gerrit.core.git_commit_new", fake_git_commit_new
     )
     monkeypatch.setattr(
-        "github2gerrit_python.core.git_commit_amend", fake_git_commit_amend
+        "github2gerrit.core.git_commit_amend", fake_git_commit_amend
     )
 
     # After commit, trailers should reflect the reused Change-Id
@@ -270,11 +268,11 @@ def test_prepare_squashed_commit_reuses_change_id_from_comments(
         return {"Change-Id": [reused_cid]}
 
     monkeypatch.setattr(
-        "github2gerrit_python.core.git_last_commit_trailers", fake_trailers
+        "github2gerrit.core.git_last_commit_trailers", fake_trailers
     )
 
     # Act
-    from github2gerrit_python.core import GerritInfo
+    from github2gerrit.core import GerritInfo
 
     gerrit = GerritInfo(
         host="gerrit.example.org", port=29418, project="example/project"

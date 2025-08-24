@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
 """
-github2gerrit_python package initializer.
+github2gerrit package initializer.
 
 This file marks the directory as a Python package to ensure static type
 checkers and runtime imports can resolve relative modules such as
@@ -21,7 +21,7 @@ try:
     from importlib.metadata import version as _pkg_version
 
     try:
-        __version__ = _pkg_version("github2gerrit-python")
+        __version__ = _pkg_version("github2gerrit")
     except PackageNotFoundError:
         __version__ = "0.0.0"
 except Exception:

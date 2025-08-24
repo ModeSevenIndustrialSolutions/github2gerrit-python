@@ -8,9 +8,9 @@ from typing import Any
 
 import pytest
 
-from github2gerrit_python.core import GerritInfo
-from github2gerrit_python.core import Orchestrator
-from github2gerrit_python.core import RepoNames
+from github2gerrit.core import GerritInfo
+from github2gerrit.core import Orchestrator
+from github2gerrit.core import RepoNames
 
 
 class _DummyHTTPError(Exception):
@@ -56,7 +56,7 @@ def test_query_gerrit_results_success_base_path(
             ]
 
     monkeypatch.setattr(
-        "github2gerrit_python.core.GerritRestAPI", DummyRest, raising=True
+        "github2gerrit.core.GerritRestAPI", DummyRest, raising=True
     )
 
     orch = Orchestrator(workspace=tmp_path_factory.mktemp("repo"))
@@ -128,7 +128,7 @@ def test_query_gerrit_results_fallback_to_r_on_404(
             raise _DummyHTTPError(status=404)
 
     monkeypatch.setattr(
-        "github2gerrit_python.core.GerritRestAPI", DummyRest, raising=True
+        "github2gerrit.core.GerritRestAPI", DummyRest, raising=True
     )
 
     orch = Orchestrator(workspace=tmp_path_factory.mktemp("repo2"))

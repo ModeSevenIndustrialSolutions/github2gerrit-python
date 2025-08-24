@@ -8,10 +8,10 @@ from typing import Any
 
 import pytest
 
-from github2gerrit_python.core import GerritInfo
-from github2gerrit_python.core import Orchestrator
-from github2gerrit_python.core import RepoNames
-from github2gerrit_python.models import GitHubContext
+from github2gerrit.core import GerritInfo
+from github2gerrit.core import Orchestrator
+from github2gerrit.core import RepoNames
+from github2gerrit.models import GitHubContext
 
 
 class _CallRecorder:
@@ -68,7 +68,7 @@ def test_add_backref_comment_invokes_ssh_with_expected_args(
 
     # Capture calls to run_cmd inside core._add_backref_comment_in_gerrit
     recorder = _CallRecorder()
-    monkeypatch.setattr("github2gerrit_python.core.run_cmd", recorder)
+    monkeypatch.setattr("github2gerrit.core.run_cmd", recorder)
 
     # Two commit SHAs should result in two ssh review invocations
     shas = ["abc123def456", "feedbead0001"]
@@ -125,7 +125,7 @@ def test_add_backref_comment_no_shas_noop(
     gh = _gh_ctx()
 
     recorder = _CallRecorder()
-    monkeypatch.setattr("github2gerrit_python.core.run_cmd", recorder)
+    monkeypatch.setattr("github2gerrit.core.run_cmd", recorder)
 
     # Act: empty commit shas should result in no ssh calls
     orch._add_backref_comment_in_gerrit(

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from github2gerrit_python.cli import app
+from github2gerrit.cli import app
 
 
 runner = CliRunner()

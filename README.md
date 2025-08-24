@@ -3,7 +3,7 @@ SPDX-License-Identifier: Apache-2.0
 SPDX-FileCopyrightText: 2025 The Linux Foundation
 -->
 
-# github2gerrit-python
+# github2gerrit
 
 Submit a GitHub pull request to a Gerrit repository, implemented in Python.
 
@@ -85,7 +85,7 @@ Use `--allow-duplicates` or set `ALLOW_DUPLICATES=true` to override:
 github2gerrit --allow-duplicates https://github.com/org/repo
 
 # GitHub Actions
-uses: onap/github2gerrit-python@main
+uses: onap/github2gerrit@main
 with:
   ALLOW_DUPLICATES: 'true'
 ```
@@ -102,7 +102,7 @@ This action runs as part of a workflow that triggers on
 Minimal example:
 
 ```yaml
-name: github2gerrit-python
+name: github2gerrit
 
 on:
   pull_request_target:
@@ -120,7 +120,7 @@ jobs:
     steps:
       - name: Submit PR to Gerrit
         id: g2g
-        uses: lfit/github2gerrit-python@main
+        uses: lfit/github2gerrit@main
         with:
           SUBMIT_SINGLE_COMMITS: "false"
           USE_PR_AS_COMMIT: "false"
@@ -227,7 +227,7 @@ before invoking this action. This is useful when:
 Example:
 
 ```yaml
-name: github2gerrit-python (advanced)
+name: github2gerrit (advanced)
 
 on:
   pull_request_target:
@@ -259,7 +259,7 @@ jobs:
 
       - name: Submit PR to Gerrit (with explicit overrides)
         id: g2g
-        uses: lfit/github2gerrit-python@main
+        uses: lfit/github2gerrit@main
         with:
           # Behavior
           SUBMIT_SINGLE_COMMITS: "false"
@@ -401,9 +401,9 @@ This repository follows the guidelines in `CLAUDE.md`.
 - Packaging
   - `pyproject.toml` with PDM backend. Use `uv` to install and run.
 - Structure
-  - `src/github2gerrit_python/cli.py` (CLI entrypoint)
-  - `src/github2gerrit_python/core.py` (orchestration)
-  - `src/github2gerrit_python/gitutils.py` (subprocess and git helpers)
+  - `src/github2gerrit/cli.py` (CLI entrypoint)
+  - `src/github2gerrit/core.py` (orchestration)
+  - `src/github2gerrit/gitutils.py` (subprocess and git helpers)
 - Linting and type checking
   - Ruff and MyPy use settings in `pyproject.toml`.
   - Run from pre‑commit hooks and CI.

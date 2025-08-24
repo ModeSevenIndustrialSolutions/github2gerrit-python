@@ -2,11 +2,11 @@
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
 [project]
-name = "github2gerrit-python"
+name = "github2gerrit"
 dynamic = ["version"]
 description = "Submit a GitHub pull request to a Gerrit repository."
 readme = "README.md"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.11,<3.14"
 license = { text = "Apache-2.0" }
 authors = [
   { name = "Matthew Watkins", email = "mwatkins@linuxfoundation.org" }
@@ -20,6 +20,7 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Software Development :: Build Tools",
   "Topic :: Software Development :: Version Control",
   "Typing :: Typed",
@@ -39,12 +40,12 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/lfit/github2gerrit-python"
-Repository = "https://github.com/lfit/github2gerrit-python"
-Issues = "https://github.com/lfit/github2gerrit-python/issues"
+Homepage = "https://github.com/lfit/github2gerrit"
+Repository = "https://github.com/lfit/github2gerrit"
+Issues = "https://github.com/lfit/github2gerrit/issues"
 
 [project.scripts]
-github2gerrit = "github2gerrit_python.cli:app"
+github2gerrit = "github2gerrit.cli:app"
 
 [build-system]
 requires = ["pdm-backend>=2.3.3"]
@@ -61,7 +62,7 @@ source = "scm"
 
 [tool.pdm.build]
 package-dir = "src"
-includes = ["github2gerrit_python"]
+includes = ["github2gerrit"]
 
 [tool.pdm.dev-dependencies]
 dev = [
@@ -99,7 +100,7 @@ ignore = [
 "tests/*.py" = ["S101", "S105", "PLW0603", "E501", "TRY003"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["github2gerrit_python"]
+known-first-party = ["github2gerrit"]
 lines-after-imports = 2
 force-single-line = true
 
@@ -135,7 +136,7 @@ ignore_missing_imports = true
 
 [tool.coverage.run]
 branch = true
-source = ["src/github2gerrit_python"]
+source = ["src/github2gerrit"]
 omit = [
   "tests/*",
 ]
@@ -151,7 +152,7 @@ directory = "coverage_html_report"
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-ra -q --cov=github2gerrit_python --cov-report=term-missing --cov-report=html"
+addopts = "-ra -q --cov=github2gerrit --cov-report=term-missing --cov-report=html"
 testpaths = ["tests"]
 
 [tool.uv]

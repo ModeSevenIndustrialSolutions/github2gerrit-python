@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from github2gerrit_python.core import Orchestrator
-from github2gerrit_python.models import GitHubContext
+from github2gerrit.core import Orchestrator
+from github2gerrit.models import GitHubContext
 
 
 def _gh_ctx(
@@ -46,10 +46,10 @@ def test_close_pr_skipped_when_preserve_github_prs_true(
             "GitHub API should not be called when PRESERVE_GITHUB_PRS is true"
         )
 
-    monkeypatch.setattr("github2gerrit_python.core.build_client", _fail)
-    monkeypatch.setattr("github2gerrit_python.core.get_repo_from_env", _fail)
-    monkeypatch.setattr("github2gerrit_python.core.get_pull", _fail)
-    monkeypatch.setattr("github2gerrit_python.core.close_pr", _fail)
+    monkeypatch.setattr("github2gerrit.core.build_client", _fail)
+    monkeypatch.setattr("github2gerrit.core.get_repo_from_env", _fail)
+    monkeypatch.setattr("github2gerrit.core.get_pull", _fail)
+    monkeypatch.setattr("github2gerrit.core.close_pr", _fail)
 
     orch = Orchestrator(workspace=tmp_path)
     gh = _gh_ctx(event_name="pull_request_target", pr_number=88)
@@ -70,10 +70,10 @@ def test_close_pr_not_invoked_for_non_target_event(
             "GitHub API should not be called for non-target events"
         )
 
-    monkeypatch.setattr("github2gerrit_python.core.build_client", _fail)
-    monkeypatch.setattr("github2gerrit_python.core.get_repo_from_env", _fail)
-    monkeypatch.setattr("github2gerrit_python.core.get_pull", _fail)
-    monkeypatch.setattr("github2gerrit_python.core.close_pr", _fail)
+    monkeypatch.setattr("github2gerrit.core.build_client", _fail)
+    monkeypatch.setattr("github2gerrit.core.get_repo_from_env", _fail)
+    monkeypatch.setattr("github2gerrit.core.get_pull", _fail)
+    monkeypatch.setattr("github2gerrit.core.close_pr", _fail)
 
     orch = Orchestrator(workspace=tmp_path)
     gh = _gh_ctx(event_name="pull_request", pr_number=42)
@@ -103,10 +103,10 @@ def test_close_pr_invoked_for_pull_request_target_event(
 
     # Patch the GitHub helper functions used by the close path
     monkeypatch.setattr(
-        "github2gerrit_python.core.build_client", lambda: DummyClient()
+        "github2gerrit.core.build_client", lambda: DummyClient()
     )
     monkeypatch.setattr(
-        "github2gerrit_python.core.get_repo_from_env", lambda _c: DummyRepo()
+        "github2gerrit.core.get_repo_from_env", lambda _c: DummyRepo()
     )
 
     def _get_pull(_repo: DummyRepo, number: int) -> DummyPR:
@@ -118,8 +118,8 @@ def test_close_pr_invoked_for_pull_request_target_event(
         calls["comment"] = comment
         pr.closed_state = "closed"
 
-    monkeypatch.setattr("github2gerrit_python.core.get_pull", _get_pull)
-    monkeypatch.setattr("github2gerrit_python.core.close_pr", _close_pr)
+    monkeypatch.setattr("github2gerrit.core.get_pull", _get_pull)
+    monkeypatch.setattr("github2gerrit.core.close_pr", _close_pr)
 
     orch = Orchestrator(workspace=tmp_path)
     gh = _gh_ctx(event_name="pull_request_target", pr_number=123)

@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from github2gerrit_python.cli import _extract_pr_number
-from github2gerrit_python.cli import _mask_secret
-from github2gerrit_python.cli import _read_github_context
+from github2gerrit.cli import _extract_pr_number
+from github2gerrit.cli import _mask_secret
+from github2gerrit.cli import _read_github_context
 
 
 # -----------------------------

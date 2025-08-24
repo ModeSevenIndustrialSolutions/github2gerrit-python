@@ -8,10 +8,10 @@ from typing import Any
 
 import pytest
 
-from github2gerrit_python.cli import _parse_github_target
-from github2gerrit_python.core import GerritInfo
-from github2gerrit_python.core import Orchestrator
-from github2gerrit_python.core import RepoNames
+from github2gerrit.cli import _parse_github_target
+from github2gerrit.core import GerritInfo
+from github2gerrit.core import Orchestrator
+from github2gerrit.core import RepoNames
 
 
 def test_ghe_url_parsing_toggle(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -67,7 +67,7 @@ def test_git_review_args_include_branch_and_repeated_reviewer_flags(
         recorded_cmds.append(list(cmd))
 
     monkeypatch.setattr(
-        "github2gerrit_python.core.run_cmd", fake_run_cmd, raising=True
+        "github2gerrit.core.run_cmd", fake_run_cmd, raising=True
     )
 
     # Act (single_commits=False to avoid extra checkout step)
