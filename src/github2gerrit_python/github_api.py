@@ -22,8 +22,6 @@ import random
 import re
 import time
 from collections.abc import Callable
-
-# unused: Generator import removed
 from collections.abc import Iterable
 from importlib import import_module
 from typing import Any

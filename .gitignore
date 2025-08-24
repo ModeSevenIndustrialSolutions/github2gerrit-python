@@ -2,6 +2,11 @@
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
 .pdm-python
+.mypy_cache
+.ruff_cache
+.pdm-build
+coverage_html_report/
+dist/
 
 # Temporary and binary files
 *~

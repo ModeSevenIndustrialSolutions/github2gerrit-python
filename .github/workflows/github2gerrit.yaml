@@ -90,6 +90,11 @@ on:
         required: false
         default: ""
         type: string
+      ISSUE_ID:
+        description: "Issue ID to include (e.g., ABC-123)"
+        required: false
+        default: ""
+        type: string
     secrets:
       GERRIT_SSH_PRIVKEY_G2G:
         description: "SSH Private key"
@@ -128,11 +133,7 @@ on:
         description: "Email of the SSH user"
         required: true
         type: string
-      ORGANIZATION:
-        description: "Organization name (empty uses repository owner)"
-        required: false
-        type: string
-        default: ""
+
       PRESERVE_GITHUB_PRS:
         description: "Do not close GitHub PRs after pushing to Gerrit"
         required: false
@@ -143,6 +144,11 @@ on:
         required: false
         default: false
         type: boolean
+      ISSUE_ID:
+        description: "Issue ID to include (e.g., ABC-123)"
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: reusable-${{ github.workflow }}-${{ github.run_id }}
@@ -172,6 +178,7 @@ jobs:
           ALLOW_GHE_URLS: ${{ inputs.ALLOW_GHE_URLS }}
           PRESERVE_GITHUB_PRS: ${{ inputs.PRESERVE_GITHUB_PRS }}
           DRY_RUN: ${{ inputs.DRY_RUN }}
+          ISSUE_ID: ${{ inputs.ISSUE_ID }}
           PR_NUMBER: ${{ inputs.PR_NUMBER }}
 
   github2gerrit-python:
@@ -194,11 +201,12 @@ jobs:
           GERRIT_SSH_PRIVKEY_G2G: ${{ secrets.GERRIT_SSH_PRIVKEY_G2G }}
           GERRIT_SSH_USER_G2G: ${{ inputs.GERRIT_SSH_USER_G2G }}
           GERRIT_SSH_USER_G2G_EMAIL: ${{ inputs.GERRIT_SSH_USER_G2G_EMAIL }}
-          ORGANIZATION: ${{ inputs.ORGANIZATION }}
+
           REVIEWERS_EMAIL: ${{ inputs.REVIEWERS_EMAIL }}
           ALLOW_GHE_URLS: ${{ inputs.ALLOW_GHE_URLS }}
           PRESERVE_GITHUB_PRS: ${{ inputs.PRESERVE_GITHUB_PRS }}
           DRY_RUN: ${{ inputs.DRY_RUN }}
+          ISSUE_ID: ${{ inputs.ISSUE_ID }}
           GERRIT_SERVER: ${{ inputs.GERRIT_SERVER }}
           GERRIT_SERVER_PORT: ${{ inputs.GERRIT_SERVER_PORT }}
           GERRIT_PROJECT: ${{ inputs.GERRIT_PROJECT }}
