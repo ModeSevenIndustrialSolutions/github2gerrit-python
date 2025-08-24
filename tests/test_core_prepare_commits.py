@@ -32,6 +32,7 @@ def _minimal_inputs() -> Inputs:
         gerrit_server_port="29418",
         gerrit_project="example/project",
         issue_id="",
+        allow_duplicates=False,
     )
 
 
@@ -147,7 +148,12 @@ def test_prepare_single_commits_collects_unique_change_ids(
     )
 
     # Act
-    result = orch._prepare_single_commits(inputs, gh)
+    from github2gerrit_python.core import GerritInfo
+
+    gerrit = GerritInfo(
+        host="gerrit.example.org", port=29418, project="example/project"
+    )
+    result = orch._prepare_single_commits(inputs, gh, gerrit)
 
     # Assert: order preserved, duplicates removed
     assert result.change_ids == [
@@ -268,7 +274,12 @@ def test_prepare_squashed_commit_reuses_change_id_from_comments(
     )
 
     # Act
-    result = orch._prepare_squashed_commit(inputs, gh)
+    from github2gerrit_python.core import GerritInfo
+
+    gerrit = GerritInfo(
+        host="gerrit.example.org", port=29418, project="example/project"
+    )
+    result = orch._prepare_squashed_commit(inputs, gh, gerrit)
 
     # Assert: the reused Change-Id should be returned
     assert result.change_ids == [reused_cid]

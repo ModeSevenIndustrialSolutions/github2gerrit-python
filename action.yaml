@@ -55,7 +55,11 @@ inputs:
     required: false
     default: "false"
   DRY_RUN:
-    description: "Validate config and connectivity only; do not write to Gerrit"
+    description: "Validate settings/PR metadata; do not write to Gerrit"
+    required: false
+    default: "false"
+  ALLOW_DUPLICATES:
+    description: "Allow submitting duplicate changes without error"
     required: false
     default: "false"
 
@@ -217,6 +221,7 @@ runs:
         ALLOW_GHE_URLS: ${{ inputs.ALLOW_GHE_URLS }}
         PRESERVE_GITHUB_PRS: ${{ inputs.PRESERVE_GITHUB_PRS }}
         DRY_RUN: ${{ inputs.DRY_RUN }}
+        ALLOW_DUPLICATES: ${{ inputs.ALLOW_DUPLICATES }}
 
         # Optional Gerrit overrides (when .gitreview is missing)
         GERRIT_SERVER: ${{ inputs.GERRIT_SERVER }}

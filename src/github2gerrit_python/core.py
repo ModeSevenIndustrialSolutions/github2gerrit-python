@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import stat
 import urllib.request
 from collections.abc import Iterable
 from collections.abc import Sequence
@@ -191,6 +192,9 @@ class Orchestrator:
         workspace: Path,
     ) -> None:
         self.workspace = workspace
+        # SSH configuration paths (set by _setup_ssh)
+        self._ssh_key_path: Path | None = None
+        self._ssh_known_hosts_path: Path | None = None
 
     # ---------------
     # Public API
@@ -210,6 +214,10 @@ class Orchestrator:
         log.info("Starting PR -> Gerrit pipeline")
         self._guard_pull_request_context(gh)
 
+        # Initialize git repository in workspace if it doesn't exist
+        if not (self.workspace / ".git").exists():
+            self._setup_git_workspace(inputs, gh)
+
         gitreview = self._read_gitreview(self.workspace / ".gitreview", gh)
         repo_names = self._derive_repo_names(gitreview, gh)
         gerrit = self._resolve_gerrit_info(gitreview, inputs, repo_names)
@@ -224,13 +232,13 @@ class Orchestrator:
                 change_urls=[], change_numbers=[], commit_shas=[]
             )
         self._setup_ssh(inputs)
-        self._configure_git(gerrit, inputs)
 
         if inputs.submit_single_commits:
-            prep = self._prepare_single_commits(inputs, gh)
+            prep = self._prepare_single_commits(inputs, gh, gerrit)
         else:
-            prep = self._prepare_squashed_commit(inputs, gh)
+            prep = self._prepare_squashed_commit(inputs, gh, gerrit)
 
+        self._configure_git(gerrit, inputs)
         self._apply_pr_title_body_if_requested(inputs, gh)
 
         self._push_to_gerrit(
@@ -260,6 +268,7 @@ class Orchestrator:
         self._close_pull_request_if_required(gh)
 
         log.info("Pipeline complete: %s", result)
+        self._cleanup_ssh()
         return result
 
     # ---------------
@@ -493,45 +502,101 @@ class Orchestrator:
         return info
 
     def _setup_ssh(self, inputs: Inputs) -> None:
-        """Set up SSH key and known hosts for Gerrit access."""
+        """Set up temporary SSH configuration for Gerrit access.
+
+        This method creates tool-specific SSH files in the workspace without
+        modifying user SSH configuration. Key features:
+
+        - Creates temporary SSH key and known_hosts files
+        - Uses GIT_SSH_COMMAND to specify exact SSH behavior
+        - Prevents SSH agent scanning with IdentitiesOnly=yes
+        - Host-specific configuration without global impact
+        - Automatic cleanup when done
+
+        Does not modify user files.
+        """
         if not inputs.gerrit_ssh_privkey_g2g or not inputs.gerrit_known_hosts:
             log.debug("SSH key or known hosts not provided, skipping SSH setup")
             return
 
-        log.info("Setting up SSH key and known hosts for Gerrit")
+        log.info("Setting up temporary SSH configuration for Gerrit")
+        log.debug("Using workspace-specific SSH files to avoid user changes")
 
-        # Ensure ~/.ssh directory exists
-        ssh_dir = Path.home() / ".ssh"
-        ssh_dir.mkdir(mode=0o700, exist_ok=True)
+        # Create tool-specific SSH directory in workspace to avoid touching
+        # user files
+        tool_ssh_dir = self.workspace / ".ssh-g2g"
+        tool_ssh_dir.mkdir(mode=0o700, exist_ok=True)
 
-        # Write SSH private key
-        key_path = ssh_dir / "id_rsa"
+        # Write SSH private key to tool-specific location
+        key_path = tool_ssh_dir / "gerrit_key"
         with open(key_path, "w", encoding="utf-8") as f:
             f.write(inputs.gerrit_ssh_privkey_g2g.strip() + "\n")
         key_path.chmod(0o600)
         log.debug("SSH private key written to %s", key_path)
+        log.debug("Key file is tool-specific and won't interfere with user SSH")
 
-        # Write known hosts
-        known_hosts_path = ssh_dir / "known_hosts"
-        with open(known_hosts_path, "a", encoding="utf-8") as f:
+        # Write known hosts to tool-specific location
+        known_hosts_path = tool_ssh_dir / "known_hosts"
+        with open(known_hosts_path, "w", encoding="utf-8") as f:
             f.write(inputs.gerrit_known_hosts.strip() + "\n")
         known_hosts_path.chmod(0o644)
-        log.debug("Known hosts appended to %s", known_hosts_path)
+        log.debug("Known hosts written to %s", known_hosts_path)
+        log.debug("Using isolated known_hosts to prevent user conflicts")
 
-        # Create SSH config if it doesn't exist
-        config_path = ssh_dir / "config"
-        if not config_path.exists():
-            config_content = """# Auto-generated SSH config for github2gerrit
-Host *
-    StrictHostKeyChecking yes
-    UserKnownHostsFile ~/.ssh/known_hosts
-    IdentityFile ~/.ssh/id_rsa
-    PubkeyAcceptedKeyTypes +ssh-rsa
-"""
-            with open(config_path, "w", encoding="utf-8") as f:
-                f.write(config_content)
-            config_path.chmod(0o600)
-            log.debug("SSH config created at %s", config_path)
+        # Store paths for later use in git commands
+        self._ssh_key_path = key_path
+        self._ssh_known_hosts_path = known_hosts_path
+
+    @property
+    def _git_ssh_command(self) -> str | None:
+        """Generate GIT_SSH_COMMAND for secure, isolated SSH configuration.
+
+        This prevents SSH from scanning the user's SSH agent or using
+        unintended keys by setting IdentitiesOnly=yes and specifying
+        exact key and known_hosts files.
+        """
+        if not self._ssh_key_path or not self._ssh_known_hosts_path:
+            return None
+
+        # Build SSH command with strict options to prevent key scanning
+        ssh_options = [
+            f"-i {self._ssh_key_path}",
+            f"-o UserKnownHostsFile={self._ssh_known_hosts_path}",
+            "-o IdentitiesOnly=yes",  # Critical: prevents SSH agent scanning
+            "-o StrictHostKeyChecking=yes",
+            "-o PasswordAuthentication=no",
+            "-o PubkeyAcceptedKeyTypes=+ssh-rsa",
+            "-o ConnectTimeout=10",
+        ]
+
+        ssh_cmd = f"ssh {' '.join(ssh_options)}"
+        masked_cmd = ssh_cmd.replace(str(self._ssh_key_path), "[KEY_PATH]")
+        log.debug("Generated SSH command: %s", masked_cmd)
+        return ssh_cmd
+
+    def _cleanup_ssh(self) -> None:
+        """Clean up temporary SSH files created by this tool.
+
+        Removes the workspace-specific .ssh-g2g directory and all contents.
+        This ensures no temporary files are left behind.
+        """
+        if not hasattr(self, "_ssh_key_path") or not hasattr(
+            self, "_ssh_known_hosts_path"
+        ):
+            return
+
+        try:
+            # Remove temporary SSH directory and all contents
+            tool_ssh_dir = self.workspace / ".ssh-g2g"
+            if tool_ssh_dir.exists():
+                import shutil
+
+                shutil.rmtree(tool_ssh_dir)
+                log.debug(
+                    "Cleaned up temporary SSH directory: %s", tool_ssh_dir
+                )
+        except Exception as exc:
+            log.warning("Failed to clean up temporary SSH files: %s", exc)
 
     def _configure_git(
         self,
@@ -611,10 +676,17 @@ Host *
                 f"ssh://{ssh_user}@{gerrit.host}:{gerrit.port}/{gerrit.project}"
             )
             log.info("Adding 'gerrit' remote: %s", remote_url)
+            # Use our specific SSH configuration for adding remote
+            env = (
+                {"GIT_SSH_COMMAND": self._git_ssh_command}
+                if self._git_ssh_command
+                else None
+            )
             run_cmd(
                 ["git", "remote", "add", "gerrit", remote_url],
                 check=False,
                 cwd=self.workspace,
+                env=env,
             )
 
         # Workaround for submodules commit-msg hook
@@ -635,7 +707,13 @@ Host *
             )
         # Initialize git-review (copies commit-msg hook)
         try:
-            run_cmd(["git", "review", "-s", "-v"], cwd=self.workspace)
+            # Use our specific SSH configuration for git-review setup
+            env = (
+                {"GIT_SSH_COMMAND": self._git_ssh_command}
+                if self._git_ssh_command
+                else None
+            )
+            run_cmd(["git", "review", "-s", "-v"], cwd=self.workspace, env=env)
         except CommandError as exc:
             msg = f"Failed to initialize git-review: {exc}"
             raise OrchestratorError(msg) from exc
@@ -644,13 +722,20 @@ Host *
         self,
         inputs: Inputs,
         gh: GitHubContext,
+        gerrit: GerritInfo,
     ) -> PreparedChange:
         """Cherry-pick commits one-by-one and ensure Change-Id is present."""
         log.info("Preparing single-commit submission for PR #%s", gh.pr_number)
         branch = self._resolve_target_branch()
         # Determine commit range: commits in HEAD not in base branch
         base_ref = f"origin/{branch}"
-        run_cmd(["git", "fetch", "origin", branch], cwd=self.workspace)
+        # Use our SSH command for git operations that might need SSH
+        env = (
+            {"GIT_SSH_COMMAND": self._git_ssh_command}
+            if self._git_ssh_command
+            else None
+        )
+        run_cmd(["git", "fetch", "origin", branch], cwd=self.workspace, env=env)
         revs = run_cmd(
             ["git", "rev-list", "--reverse", f"{base_ref}..HEAD"],
             cwd=self.workspace,
@@ -697,17 +782,33 @@ Host *
                 uniq_ids.append(cid)
                 seen.add(cid)
         run_cmd(["git", "log", "-n3", tmp_branch], cwd=self.workspace)
+        if uniq_ids:
+            log.info(
+                "Generated %d unique Change-ID(s) for PR #%s: %s",
+                len(uniq_ids),
+                gh.pr_number,
+                ", ".join(uniq_ids),
+            )
+        else:
+            log.warning("No Change-IDs generated for PR #%s", gh.pr_number)
         return PreparedChange(change_ids=uniq_ids, commit_shas=[])
 
     def _prepare_squashed_commit(
         self,
         inputs: Inputs,
         gh: GitHubContext,
+        gerrit: GerritInfo,
     ) -> PreparedChange:
         """Squash PR commits into a single commit and handle Change-Id."""
         log.info("Preparing squashed commit for PR #%s", gh.pr_number)
         branch = self._resolve_target_branch()
-        run_cmd(["git", "fetch", "origin", branch], cwd=self.workspace)
+        # Use our SSH command for git operations that might need SSH
+        env = (
+            {"GIT_SSH_COMMAND": self._git_ssh_command}
+            if self._git_ssh_command
+            else None
+        )
+        run_cmd(["git", "fetch", "origin", branch], cwd=self.workspace, env=env)
         base_ref = f"origin/{branch}"
         base_sha = run_cmd(
             ["git", "rev-parse", base_ref], cwd=self.workspace
@@ -824,11 +925,14 @@ Host *
 
         message_lines = clean_message_lines
         # Reuse Change-Id if PR reopened/synchronized and prior CID exists
+        # BUT only for single-PR mode to prevent cross-PR contamination
         pr = str(gh.pr_number or "").strip()
         reuse_cid = ""
-        if gh.event_name == "pull_request_target" and gh.event_action in (
-            "reopened",
-            "synchronize",
+        sync_all_prs = os.getenv("SYNC_ALL_OPEN_PRS", "false").lower() == "true"
+        if (
+            not sync_all_prs
+            and gh.event_name == "pull_request_target"
+            and gh.event_action in ("reopened", "synchronize")
         ):
             try:
                 client = build_client()
@@ -839,8 +943,18 @@ Host *
                 )
                 if cand:
                     reuse_cid = cand[-1]
+                    log.debug(
+                        "Reusing Change-ID %s for PR #%s (single-PR mode)",
+                        reuse_cid,
+                        pr,
+                    )
             except Exception:
                 reuse_cid = ""
+        elif sync_all_prs:
+            log.debug(
+                "Skipping Change-ID reuse for PR #%s (multi-PR mode)",
+                pr,
+            )
         # Compose final commit message
         commit_msg = "\n".join(message_lines).strip()
         # Add Issue-ID if provided
@@ -871,8 +985,11 @@ Host *
         )
         if not trailers.get("Change-Id"):
             log.debug(
-                "No Change-Id found, amending commit to trigger commit-msg hook"
+                "No Change-Id found, installing commit-msg hook and "
+                "amending commit"
             )
+            # Ensure commit-msg hook is properly installed
+            self._install_commit_msg_hook(gerrit)
             git_commit_amend(
                 no_edit=True, signoff=True, author=author, cwd=self.workspace
             )
@@ -886,6 +1003,14 @@ Host *
                 keys=["Change-Id"], cwd=self.workspace
             )
         cids = [c for c in trailers.get("Change-Id", []) if c]
+        if cids:
+            log.info(
+                "Generated Change-ID(s) for PR #%s: %s",
+                gh.pr_number,
+                ", ".join(cids),
+            )
+        else:
+            log.warning("No Change-ID generated for PR #%s", gh.pr_number)
         return PreparedChange(change_ids=cids, commit_shas=[])
 
     def _apply_pr_title_body_if_requested(
@@ -994,7 +1119,14 @@ Host *
                 args.extend(["--reviewer", r])
             # Branch flag
             args.extend(["-b", branch])
-            run_cmd(args, cwd=self.workspace)
+
+            # Use our specific SSH configuration
+            env = (
+                {"GIT_SSH_COMMAND": self._git_ssh_command}
+                if self._git_ssh_command
+                else None
+            )
+            run_cmd(args, cwd=self.workspace, env=env)
         except CommandError as exc:
             msg = f"Failed to push changes to Gerrit with git-review: {exc}"
             raise OrchestratorError(msg) from exc
@@ -1119,6 +1251,74 @@ Host *
         return SubmissionResult(
             change_urls=urls, change_numbers=nums, commit_shas=shas
         )
+
+    def _setup_git_workspace(self, inputs: Inputs, gh: GitHubContext) -> None:
+        """Initialize and set up git workspace for PR processing."""
+        from .gitutils import run_cmd
+
+        # Initialize git repository
+        run_cmd(["git", "init"], cwd=self.workspace)
+
+        # Add GitHub remote
+        repo_full = gh.repository.strip() if gh.repository else ""
+        server_url = gh.server_url or "https://github.com"
+        server_url = server_url.rstrip("/")
+        repo_url = f"{server_url}/{repo_full}.git"
+        run_cmd(
+            ["git", "remote", "add", "origin", repo_url],
+            cwd=self.workspace,
+        )
+
+        # Fetch PR head
+        if gh.pr_number:
+            pr_ref = (
+                f"refs/pull/{gh.pr_number}/head:"
+                f"refs/remotes/origin/pr/{gh.pr_number}/head"
+            )
+            run_cmd(
+                [
+                    "git",
+                    "fetch",
+                    f"--depth={inputs.fetch_depth}",
+                    "origin",
+                    pr_ref,
+                ],
+                cwd=self.workspace,
+            )
+            # Checkout PR head
+            pr_head_ref = f"refs/remotes/origin/pr/{gh.pr_number}/head"
+            run_cmd(
+                ["git", "checkout", "-B", "g2g_pr_head", pr_head_ref],
+                cwd=self.workspace,
+            )
+
+    def _install_commit_msg_hook(self, gerrit: GerritInfo) -> None:
+        """Manually install commit-msg hook from Gerrit."""
+        from .gitutils import run_cmd
+
+        hooks_dir = self.workspace / ".git" / "hooks"
+        hooks_dir.mkdir(exist_ok=True)
+        hook_path = hooks_dir / "commit-msg"
+
+        # Download commit-msg hook using SSH
+        try:
+            # Use curl to download the hook (more reliable than scp)
+            curl_cmd = [
+                "curl",
+                "-o",
+                str(hook_path),
+                f"https://{gerrit.host}/r/tools/hooks/commit-msg",
+            ]
+            run_cmd(curl_cmd, cwd=self.workspace)
+
+            # Make hook executable
+            hook_path.chmod(hook_path.stat().st_mode | stat.S_IEXEC)
+            log.debug("Successfully installed commit-msg hook via curl")
+
+        except Exception as exc:
+            log.warning("Failed to install commit-msg hook via curl: %s", exc)
+            msg = f"Could not install commit-msg hook: {exc}"
+            raise OrchestratorError(msg) from exc
 
     def _add_backref_comment_in_gerrit(
         self,

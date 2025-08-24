@@ -355,13 +355,32 @@ def git_config(
     try:
         git(args, cwd=cwd)
     except CommandError as exc:
-        raise GitError(  # noqa: TRY003
-            f"git config failed for {key}",
-            cmd=exc.cmd,
-            returncode=exc.returncode,
-            stdout=exc.stdout,
-            stderr=exc.stderr,
-        ) from exc
+        # If we got an error about multiple values, try with --replace-all
+        if exc.returncode == 5 and "multiple values" in (exc.stderr or ""):
+            args = ["config"]
+            if global_:
+                args.append("--global")
+            args.append("--replace-all")
+            args.extend([key, value])
+            try:
+                git(args, cwd=cwd)
+            except CommandError:
+                # If replace-all also fails, raise the original error
+                raise GitError(  # noqa: TRY003
+                    f"git config failed for {key}",
+                    cmd=exc.cmd,
+                    returncode=exc.returncode,
+                    stdout=exc.stdout,
+                    stderr=exc.stderr,
+                ) from exc
+        else:
+            raise GitError(  # noqa: TRY003
+                f"git config failed for {key}",
+                cmd=exc.cmd,
+                returncode=exc.returncode,
+                stdout=exc.stdout,
+                stderr=exc.stderr,
+            ) from exc
 
 
 def git_reset_soft(ref: str, *, cwd: Path | None = None) -> None:

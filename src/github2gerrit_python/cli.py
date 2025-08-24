@@ -19,6 +19,8 @@ from .config import apply_config_to_env
 from .config import load_org_config
 from .core import Orchestrator
 from .core import SubmissionResult
+from .duplicate_detection import DuplicateChangeError
+from .duplicate_detection import check_for_duplicates
 from .github_api import build_client
 from .github_api import get_pull
 from .github_api import get_repo_from_env
@@ -171,6 +173,12 @@ def main(
         envvar="ISSUE_ID",
         help="Issue ID to include in commit message (e.g., Issue-ID: ABC-123).",
     ),
+    allow_duplicates: bool = typer.Option(
+        False,
+        "--allow-duplicates",
+        envvar="ALLOW_DUPLICATES",
+        help="Allow submitting duplicate changes without error.",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -222,6 +230,8 @@ def main(
         os.environ["GERRIT_PROJECT"] = gerrit_project
     if issue_id:
         os.environ["ISSUE_ID"] = issue_id
+    if allow_duplicates:
+        os.environ["ALLOW_DUPLICATES"] = "true"
     # URL mode handling
     if target_url:
         org, repo, pr = _parse_github_target(target_url)
@@ -299,8 +309,9 @@ def _build_inputs_from_env() -> Inputs:
         dry_run=_env_bool("DRY_RUN", False),
         gerrit_server=_env_str("GERRIT_SERVER", ""),
         gerrit_server_port=_env_str("GERRIT_SERVER_PORT", "29418"),
-        gerrit_project=_env_str("GERRIT_PROJECT", ""),
-        issue_id=_env_str("ISSUE_ID", ""),
+        gerrit_project=_env_str("GERRIT_PROJECT"),
+        issue_id=_env_str("ISSUE_ID"),
+        allow_duplicates=_env_bool("ALLOW_DUPLICATES", False),
     )
 
 
@@ -345,6 +356,7 @@ def _process() -> None:
                     gerrit_server_port=data.gerrit_server_port,
                     gerrit_project=data.gerrit_project,
                     issue_id=data.issue_id,
+                    allow_duplicates=data.allow_duplicates,
                 )
                 log.info("Derived reviewers: %s", data.reviewers_email)
         except Exception as exc:
@@ -397,6 +409,24 @@ def _process() -> None:
                 pr_number=pr_number,
             )
 
+            log.debug(
+                "Processing PR #%d in multi-PR mode with event_name=%s, "
+                "event_action=%s",
+                pr_number,
+                gh.event_name,
+                gh.event_action,
+            )
+
+            # Check for duplicates before processing
+            try:
+                check_for_duplicates(
+                    per_ctx, allow_duplicates=data.allow_duplicates
+                )
+            except DuplicateChangeError as exc:
+                log.exception("Skipping PR #%d", pr_number)
+                print(f"Skipping PR #{pr_number}: {exc}")
+                continue
+
             # Create temporary directory for git operations per PR
             with tempfile.TemporaryDirectory() as temp_dir:
                 workspace = Path(temp_dir)
@@ -404,14 +434,22 @@ def _process() -> None:
                 result_multi = orch.execute(inputs=data, gh=per_ctx)
                 if result_multi.change_urls:
                     all_urls.extend(result_multi.change_urls)
+                    # Output URLs immediately for each PR
+                    for url in result_multi.change_urls:
+                        print(f"Gerrit change URL: {url}")
+                        log.info(
+                            "PR #%d created Gerrit change: %s", pr_number, url
+                        )
                 if result_multi.change_numbers:
                     all_nums.extend(result_multi.change_numbers)
+                    log.info(
+                        "PR #%d change numbers: %s",
+                        pr_number,
+                        result_multi.change_numbers,
+                    )
 
         if all_urls:
             os.environ["GERRIT_CHANGE_REQUEST_URL"] = "\n".join(all_urls)
-            # Output Gerrit change URL(s) to console
-            for url in all_urls:
-                log.info("Gerrit change URL: %s", url)
         if all_nums:
             os.environ["GERRIT_CHANGE_REQUEST_NUM"] = "\n".join(all_nums)
 
@@ -479,6 +517,18 @@ def _process() -> None:
             gh = _read_github_context()
         except Exception as exc:
             log.debug("Could not resolve PR refs via GitHub API: %s", exc)
+
+    # Check for duplicates in single-PR mode (before workspace setup)
+    if gh.pr_number and not _env_bool("SYNC_ALL_OPEN_PRS", False):
+        try:
+            check_for_duplicates(gh, allow_duplicates=data.allow_duplicates)
+        except DuplicateChangeError as exc:
+            log.exception("Duplicate change detected")
+            typer.echo(f"Error: {exc}", err=True)
+            typer.echo(
+                "Use --allow-duplicates to override this check.", err=True
+            )
+            raise typer.Exit(code=3) from exc
 
     # Create temporary directory for all git operations
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -565,7 +615,7 @@ def _process() -> None:
             )
             # Output Gerrit change URL(s) to console
             for url in result.change_urls:
-                log.info("Gerrit change URL: %s", url)
+                print(f"Gerrit change URL: {url}")
         if result.change_numbers:
             os.environ["GERRIT_CHANGE_REQUEST_NUM"] = "\n".join(
                 result.change_numbers

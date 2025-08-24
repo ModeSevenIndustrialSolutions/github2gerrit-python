@@ -24,6 +24,7 @@ refactors it to Python with typed modules and test support.
 ## How it works (high level)
 
 - Discover pull request context and inputs.
+- Check for duplicate changes to prevent spam from automated tools.
 - Read `.gitreview` for Gerrit host, port, and project.
 - Set up `git` user config and SSH for Gerrit.
 - Prepare commits:
@@ -48,6 +49,36 @@ refactors it to Python with typed modules and test support.
   - `issues: write` (to create PR comments via the Issues API)
 - The workflow runs with `pull_request_target` or via
   `workflow_dispatch` using a valid PR context.
+
+## Duplicate detection
+
+By default, the tool checks for duplicate changes to prevent spam
+submissions from automated tools like Dependabot. It compares PR titles,
+content, and files changed against recent PRs (last 7 days) and will
+exit with an error when it finds duplicates.
+
+### Examples of detected duplicates
+
+- Identical Dependabot PRs: "Bump package from 1.0 to 1.1"
+- Sequential dependency updates: "Bump package 1.0→1.1", "Bump package 1.1→1.2"
+- Similar bug fixes with slightly different wording
+
+### Allowing duplicates
+
+Use `--allow-duplicates` or set `ALLOW_DUPLICATES=true` to override:
+
+```bash
+# CLI usage
+github2gerrit --allow-duplicates https://github.com/org/repo
+
+# GitHub Actions
+uses: onap/github2gerrit-python@main
+with:
+  ALLOW_DUPLICATES: 'true'
+```
+
+When allowed, duplicates generate warnings but processing continues.
+The tool exits with code 3 when it detects duplicates and they are not allowed.
 
 ## Usage
 
@@ -338,8 +369,11 @@ the environment as:
 
 - Do not hardcode secrets or keys. Provide the private key via the
   workflow secrets and known hosts via repository or org variables.
-- SSH config respects `known_hosts` and the SSH identity set by the
-  workflow step that installs the key.
+- SSH handling is non-invasive: the tool creates temporary SSH files in
+  the workspace without modifying user SSH configuration or keys.
+- SSH agent scanning prevention uses `IdentitiesOnly=yes` to avoid
+  unintended key usage (e.g., signing keys requiring biometric auth).
+- Temporary SSH files are automatically cleaned up after execution.
 - All external calls should use retries and clear error reporting.
 
 ## Development
