@@ -15,8 +15,8 @@ from unittest.mock import patch
 
 import pytest
 
-from github2gerrit_python.core import Orchestrator
-from github2gerrit_python.models import Inputs
+from github2gerrit.core import Orchestrator
+from github2gerrit.models import Inputs
 
 
 @pytest.fixture  # type: ignore[misc]

@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from github2gerrit_python.core import GerritInfo
-from github2gerrit_python.core import Orchestrator
-from github2gerrit_python.core import RepoNames
-from github2gerrit_python.models import GitHubContext
-from github2gerrit_python.models import Inputs
+from github2gerrit.core import GerritInfo
+from github2gerrit.core import Orchestrator
+from github2gerrit.core import RepoNames
+from github2gerrit.models import GitHubContext
+from github2gerrit.models import Inputs
 
 
 sys.path.append(str(Path(__file__).parent))

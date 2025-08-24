@@ -8,13 +8,13 @@ from typing import Any
 
 import pytest
 
-from github2gerrit_python.core import GerritInfo
-from github2gerrit_python.core import Orchestrator
-from github2gerrit_python.core import OrchestratorError
-from github2gerrit_python.core import RepoNames
-from github2gerrit_python.gitutils import CommandError
-from github2gerrit_python.gitutils import CommandResult
-from github2gerrit_python.models import Inputs
+from github2gerrit.core import GerritInfo
+from github2gerrit.core import Orchestrator
+from github2gerrit.core import OrchestratorError
+from github2gerrit.core import RepoNames
+from github2gerrit.gitutils import CommandError
+from github2gerrit.gitutils import CommandResult
+from github2gerrit.models import Inputs
 
 
 # -----------------------------
@@ -108,7 +108,7 @@ def test_push_to_gerrit_topic_default_prefix_with_pr(
         # Provide stdout for any consumers; not used in _push_to_gerrit
         return CommandResult(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("github2gerrit_python.core.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("github2gerrit.core.run_cmd", fake_run_cmd)
 
     # Act
     orch._push_to_gerrit(
@@ -152,7 +152,7 @@ def test_push_to_gerrit_topic_custom_prefix_without_pr(
         calls.append(list(cmd))
         return CommandResult(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("github2gerrit_python.core.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("github2gerrit.core.run_cmd", fake_run_cmd)
 
     # Act
     orch._push_to_gerrit(
@@ -203,7 +203,7 @@ def test_push_to_gerrit_raises_on_git_review_failure(
             )
         return CommandResult(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("github2gerrit_python.core.run_cmd", fake_run_cmd_fail)
+    monkeypatch.setattr("github2gerrit.core.run_cmd", fake_run_cmd_fail)
 
     with pytest.raises(OrchestratorError) as ei:
         orch._push_to_gerrit(
@@ -226,9 +226,7 @@ def test_configure_git_raises_on_git_review_init_failure(
     inputs = _minimal_inputs()
 
     # No-op git_config to avoid touching real config
-    monkeypatch.setattr(
-        "github2gerrit_python.core.git_config", lambda *a, **k: None
-    )
+    monkeypatch.setattr("github2gerrit.core.git_config", lambda *a, **k: None)
 
     def fake_run_cmd(cmd: list[str], **kwargs: Any) -> CommandResult:
         # Provide a fake repo root for rev-parse
@@ -248,7 +246,7 @@ def test_configure_git_raises_on_git_review_init_failure(
         # Default success
         return CommandResult(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("github2gerrit_python.core.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("github2gerrit.core.run_cmd", fake_run_cmd)
 
     with pytest.raises(OrchestratorError) as ei:
         orch._configure_git(gerrit, inputs)

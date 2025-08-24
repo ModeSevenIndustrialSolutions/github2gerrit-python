@@ -6,8 +6,8 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from github2gerrit_python import cli as cli_mod
-from github2gerrit_python.cli import app
+from github2gerrit import cli as cli_mod
+from github2gerrit.cli import app
 
 
 runner = CliRunner()

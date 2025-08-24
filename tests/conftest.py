@@ -12,6 +12,12 @@ from pathlib import Path
 from typing import Any
 
 
+# Ensure src directory is on sys.path so tests can import the package without installation
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 # Isolate coverage output to a unique temp file to avoid data mixing across runs
 if not os.getenv("COVERAGE_FILE"):
     import tempfile

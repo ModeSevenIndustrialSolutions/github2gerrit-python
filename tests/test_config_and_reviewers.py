@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from github2gerrit_python.config import apply_config_to_env
-from github2gerrit_python.config import load_org_config
-from github2gerrit_python.gitutils import enumerate_reviewer_emails
+from github2gerrit.config import apply_config_to_env
+from github2gerrit.config import load_org_config
+from github2gerrit.gitutils import enumerate_reviewer_emails
 
 
 def test_config_loading_and_precedence(
@@ -101,12 +101,12 @@ def test_enumerate_reviewer_emails_fallback(
         return None
 
     monkeypatch.setattr(
-        "github2gerrit_python.gitutils.git_config_get_all",
+        "github2gerrit.gitutils.git_config_get_all",
         fake_get_all,
         raising=True,
     )
     monkeypatch.setattr(
-        "github2gerrit_python.gitutils.git_config_get",
+        "github2gerrit.gitutils.git_config_get",
         fake_get,
         raising=True,
     )

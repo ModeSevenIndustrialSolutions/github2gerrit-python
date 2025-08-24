@@ -861,5 +861,5 @@ def _log_effective_config(data: Inputs, gh: GitHubContext) -> None:
 if __name__ == "__main__":
     # Invoke the Typer app when executed as a script.
     # Example:
-    #   python -m github2gerrit_python.cli --help
+    #   python -m github2gerrit.cli --help
     app()

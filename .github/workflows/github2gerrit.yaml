@@ -181,7 +181,7 @@ jobs:
           ISSUE_ID: ${{ inputs.ISSUE_ID }}
           PR_NUMBER: ${{ inputs.PR_NUMBER }}
 
-  github2gerrit-python:
+  github2gerrit:
     # Only run if we have a proper pull request context
     if: ${{ github.event.pull_request.number || github.event.issue.number }}
     runs-on: ubuntu-latest
