@@ -356,17 +356,22 @@ class DuplicateDetector:
             )
             return False
 
-        # Build the GitHub PR URL that would be referenced in Gerrit
-        pr_url = f"{gh.server_url}/{gh.repository}/pull/{gh.pr_number}"
+        # Generate the GitHub change hash for this PR
+        github_hash = DuplicateDetector._generate_github_change_hash(gh)
 
         try:
-            # Search for changes that contain the GitHub PR URL in comments
-            # Using Gerrit's search syntax to find changes with this PR URL
-            query = f'project:{gerrit_project} comment:"GHPR: {pr_url}"'
+            # Search for changes that contain the GitHub hash in commit messages
+            # This is more reliable than comment-based searches
+            query = (
+                f'project:{gerrit_project} message:"GitHub-Hash: {github_hash}"'
+            )
             path = f"/changes/?q={query}&n=10"
 
             log.debug(
-                "Searching Gerrit for existing changes with query: %s", query
+                "Searching Gerrit for existing changes with GitHub hash %s, "
+                "query: %s",
+                github_hash,
+                query,
             )
             # Use getattr for dynamic method access to avoid type checking
             changes = rest.get(path)  # type: ignore[attr-defined]
@@ -424,6 +429,35 @@ class DuplicateDetector:
             log.warning("Failed to query Gerrit for existing changes: %s", exc)
             # If we can't check Gerrit, err on the side of caution
             return False
+
+    @staticmethod
+    def _generate_github_change_hash(gh: GitHubContext) -> str:
+        """Generate a deterministic hash for a GitHub PR to identify duplicates.
+
+        This creates a SHA256 hash based on stable PR metadata that uniquely
+        identifies the change content, making duplicate detection reliable
+        regardless of comment formatting or API issues.
+
+        Args:
+            gh: GitHub context containing PR information
+
+        Returns:
+            Hex-encoded SHA256 hash string (first 16 characters for readability)
+        """
+        import hashlib
+
+        # Build hash input from stable, unique PR identifiers
+        # Use server_url + repository + pr_number for global uniqueness
+        hash_input = f"{gh.server_url}/{gh.repository}/pull/{gh.pr_number}"
+
+        # Create SHA256 hash and take first 16 characters for readability
+        hash_bytes = hashlib.sha256(hash_input.encode("utf-8")).digest()
+        hash_hex = hash_bytes.hex()[:16]
+
+        log.debug(
+            "Generated GitHub change hash for %s: %s", hash_input, hash_hex
+        )
+        return hash_hex
 
     def check_for_duplicates(
         self,
