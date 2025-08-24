@@ -12,6 +12,7 @@ from typing import Any
 from typing import cast
 from urllib.parse import urlparse
 
+import click
 import typer
 
 from . import models
@@ -70,7 +71,21 @@ def _parse_github_target(url: str) -> tuple[str | None, str | None, int | None]:
 
 
 APP_NAME = "github2gerrit"
-app: typer.Typer = typer.Typer(add_completion=False, no_args_is_help=False)
+
+
+class _SingleUsageGroup(click.Group):  # type: ignore[misc]
+    def format_usage(self, ctx: Any, formatter: Any) -> None:
+        # Force a simplified usage line without COMMAND [ARGS]...
+        formatter.write_usage(
+            ctx.command_path, "[OPTIONS] TARGET_URL", prefix="Usage: "
+        )
+
+
+app: typer.Typer = typer.Typer(
+    add_completion=False,
+    no_args_is_help=False,
+    cls=_SingleUsageGroup,
+)
 
 
 def _resolve_org(default_org: str | None) -> str:
@@ -83,11 +98,13 @@ def _resolve_org(default_org: str | None) -> str:
     return ""
 
 
-@app.callback(invoke_without_command=True)  # type: ignore[misc]
+@app.command()  # type: ignore[misc]
 def main(
     ctx: typer.Context,
     target_url: str | None = typer.Argument(
-        None, help="GitHub repository or PR URL"
+        None,
+        help="GitHub repository or PR URL",
+        metavar="TARGET_URL",
     ),
     submit_single_commits: bool = typer.Option(
         False,
@@ -198,10 +215,16 @@ def main(
     ),
 ) -> None:
     """
-    Root entrypoint supporting three scenarios:
-      1) No arguments (CI): read context and inputs from environment.
-      2) Repo URL: process all open PRs for that repository.
-      3) PR URL: process the specified PR for that repository.
+    Tool to convert GitHub pull requests into Gerrit changes
+
+    - Providing a URL to a pull request: converts that pull request
+      into a Gerrit change
+
+    - Providing a URL to a GitHub repository converts all open pull
+      requests into Gerrit changes
+
+    - No arguments for CI/CD environment; reads parameters from
+      environment variables
     """
     # Set up logging level based on verbose flag
     if verbose:
