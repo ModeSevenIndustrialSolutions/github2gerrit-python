@@ -43,7 +43,7 @@ def test_git_review_args_include_branch_and_repeated_reviewer_flags(
 ) -> None:
     """
     _push_to_gerrit should:
-      - include '-b <branch>' to target the Gerrit branch explicitly
+      - include branch as positional argument at the end
       - expand comma-separated reviewers into repeated '--reviewer' flags
       - include a topic derived from env and repo name (PR_NUMBER and G2G_TOPIC_PREFIX)
     """
@@ -98,10 +98,8 @@ def test_git_review_args_include_branch_and_repeated_reviewer_flags(
     t_idx = args.index("-t")
     assert args[t_idx + 1] == "GH-my-repo-42"
 
-    # Branch flag present and correct
-    assert "-b" in args
-    b_idx = args.index("-b")
-    assert args[b_idx + 1] == branch
+    # Branch as positional argument at the end
+    assert args[-1] == branch
 
     # Reviewers are passed via repeated --reviewer flags; no '--reviewers' aggregate flag
     assert "--reviewers" not in args
