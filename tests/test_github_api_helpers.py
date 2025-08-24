@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from github2gerrit_python import github_api as ghapi
@@ -15,9 +17,13 @@ def test_build_client_uses_env_token_and_returns_dummy(
     captured: dict[str, object] = {}
 
     class DummyGithub:
-        def __init__(self, *, login_or_token: str, per_page: int) -> None:
-            captured["token"] = login_or_token
-            captured["per_page"] = per_page
+        def __init__(self, **kwargs: Any) -> None:
+            # Extract the key parameters we care about for testing
+            captured["token"] = kwargs.get("login_or_token")
+            captured["per_page"] = kwargs.get("per_page", 100)
+            # Handle auth object if present (newer PyGithub API)
+            if "auth" in kwargs and hasattr(kwargs["auth"], "token"):
+                captured["token"] = kwargs["auth"].token
 
     monkeypatch.setenv("GITHUB_TOKEN", "env-token-123")
     monkeypatch.setattr(ghapi, "Github", DummyGithub, raising=True)

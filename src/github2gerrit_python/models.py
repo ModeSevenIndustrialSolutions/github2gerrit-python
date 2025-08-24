@@ -51,6 +51,7 @@ class Inputs:
     gerrit_server_port: str
     gerrit_project: str
     issue_id: str
+    allow_duplicates: bool
 
 
 @dataclass(frozen=True)

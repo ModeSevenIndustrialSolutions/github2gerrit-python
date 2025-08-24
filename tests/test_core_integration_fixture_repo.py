@@ -37,6 +37,7 @@ def _minimal_inputs(*, dry_run: bool = False) -> Inputs:
         gerrit_server_port="29418",
         gerrit_project="example/project",
         issue_id="",
+        allow_duplicates=False,
     )
 
 
@@ -153,6 +154,7 @@ def test_resolve_gerrit_info_dry_run_uses_derived_project_when_missing(
         gerrit_server_port=inputs.gerrit_server_port,
         gerrit_project="",  # Missing, should derive from repo name
         issue_id=inputs.issue_id,
+        allow_duplicates=inputs.allow_duplicates,
     )
     info = orch._resolve_gerrit_info(None, inputs, names)
     assert info.host == "gerrit.example.org"
