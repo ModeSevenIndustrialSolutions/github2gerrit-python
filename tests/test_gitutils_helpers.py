@@ -254,3 +254,37 @@ def test_git_last_commit_trailers_parsing_edge_cases(
         "Ideadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
         "Iabc123abc123abc123abc123abc123abc123ab",
     ]
+
+
+def test_git_quiet_suppresses_failure_logging(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that git_quiet doesn't log failures like regular git commands do."""
+    from github2gerrit_python.gitutils import git_quiet
+
+    # Mock run_cmd to simulate a command failure
+    def fake_run_cmd(cmd: list[str], **kwargs: object) -> CommandResult:
+        return CommandResult(
+            returncode=1, stdout="", stderr="config key not found"
+        )
+
+    monkeypatch.setattr("github2gerrit_python.gitutils.run_cmd", fake_run_cmd)
+
+    # Clear any existing log messages
+    caplog.clear()
+
+    # Call git_quiet with a command that will "fail"
+    result = git_quiet(["config", "--get", "nonexistent.key"])
+
+    # Should return failure result without logging
+    assert result.returncode == 1
+    assert result.stderr == "config key not found"
+
+    # No debug logs should be captured (git_quiet suppresses them)
+    debug_logs = [
+        record for record in caplog.records if record.levelname == "DEBUG"
+    ]
+    failure_logs = [
+        record for record in debug_logs if "Command failed" in record.message
+    ]
+    assert len(failure_logs) == 0

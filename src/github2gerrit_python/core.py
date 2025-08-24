@@ -1135,7 +1135,9 @@ class Orchestrator:
         if tmp_branch:
             # Switch back to the target branch, then delete the temp branch
             run_cmd(
-                ["git", "checkout", branch], check=False, cwd=self.workspace
+                ["git", "checkout", f"origin/{branch}"],
+                check=False,
+                cwd=self.workspace,
             )
             run_cmd(
                 ["git", "branch", "-D", tmp_branch],
@@ -1342,7 +1344,7 @@ class Orchestrator:
             if gh.run_id
             else "N/A"
         )
-        message = f"GHPR: {pr_url}\nAction-Run: {run_url}\n"
+        message = f"GHPR: {pr_url}\\nAction-Run: {run_url}"
         for csha in commit_shas:
             if not csha:
                 continue
@@ -1366,7 +1368,8 @@ class Orchestrator:
                     ]
                 )
                 log.debug(
-                    "Successfully added back-reference comment for %s", csha
+                    "Successfully added back-reference comment for %s",
+                    csha,
                 )
             except Exception as exc:
                 log.warning(
@@ -1639,11 +1642,12 @@ class Orchestrator:
         b = os.getenv("GITHUB_BASE_REF", "").strip()
         if b:
             return b
-        # Try resolve origin/HEAD -> origin/&lt;branch&gt;
+        # Try resolve origin/HEAD -> origin/<branch>
         try:
-            res = run_cmd(
-                ["git", "rev-parse", "--abbrev-ref", "origin/HEAD"],
-                check=False,
+            from .gitutils import git_quiet
+
+            res = git_quiet(
+                ["rev-parse", "--abbrev-ref", "origin/HEAD"],
                 cwd=self.workspace,
             )
             if res.returncode == 0:
@@ -1655,9 +1659,8 @@ class Orchestrator:
             log.debug("origin/HEAD probe failed: %s", exc)
         # Prefer 'master' when present
         try:
-            res3 = run_cmd(
-                ["git", "show-ref", "--verify", "refs/remotes/origin/master"],
-                check=False,
+            res3 = git_quiet(
+                ["show-ref", "--verify", "refs/remotes/origin/master"],
                 cwd=self.workspace,
             )
             if res3.returncode == 0:
@@ -1666,9 +1669,8 @@ class Orchestrator:
             log.debug("origin/master probe failed: %s", exc)
         # Fall back to 'main' if present
         try:
-            res2 = run_cmd(
-                ["git", "show-ref", "--verify", "refs/remotes/origin/main"],
-                check=False,
+            res2 = git_quiet(
+                ["show-ref", "--verify", "refs/remotes/origin/main"],
                 cwd=self.workspace,
             )
             if res2.returncode == 0:

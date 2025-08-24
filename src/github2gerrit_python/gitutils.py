@@ -341,6 +341,27 @@ def git(
     )
 
 
+def git_quiet(
+    args: Sequence[str],
+    *,
+    cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    timeout: float | None = None,
+) -> CommandResult:
+    """Run a git subcommand quietly (no failure logging for expected)."""
+    cmd = ["git", *args]
+    try:
+        return run_cmd(
+            cmd,
+            cwd=cwd,
+            env=env,
+            timeout=timeout,
+            check=False,
+        )
+    except Exception:
+        return CommandResult(returncode=1, stdout="", stderr="")
+
+
 def git_config(
     key: str,
     value: str,
@@ -598,12 +619,14 @@ def git_config_get(
         args.append("--global")
     args.extend(["--get", key])
     try:
-        res = git(args)
-        value = res.stdout.strip()
-    except CommandError:
+        res = git_quiet(args, cwd=None)
+        if res.returncode == 0:
+            value = res.stdout.strip()
+            return value if value else None
+        else:
+            return None
+    except Exception:
         return None
-    else:
-        return value if value else None
 
 
 def git_config_get_all(
@@ -617,12 +640,16 @@ def git_config_get_all(
         args.append("--global")
     args.extend(["--get-all", key])
     try:
-        res = git(args, check=False)
-        values = [ln.strip() for ln in res.stdout.splitlines() if ln.strip()]
-    except CommandError:
+        res = git_quiet(args, cwd=None)
+        if res.returncode == 0:
+            values = [
+                ln.strip() for ln in res.stdout.splitlines() if ln.strip()
+            ]
+            return values
+        else:
+            return []
+    except Exception:
         return []
-    else:
-        return values
 
 
 def enumerate_reviewer_emails() -> list[str]:
