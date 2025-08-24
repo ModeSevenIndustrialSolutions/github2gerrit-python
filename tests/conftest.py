@@ -89,10 +89,13 @@ def pytest_sessionstart(session: Any) -> None:
         cfg_tmp.write_text("", encoding="utf-8")
         os.environ["G2G_CONFIG_PATH"] = str(cfg_tmp)
     except Exception:
-        # Fallback: explicit empty path that will not exist
-        os.environ["G2G_CONFIG_PATH"] = str(
-            Path.cwd() / "tests" / ".empty-config.ini"
-        )
+        # Fallback: use a non-existent path to disable config loading entirely
+        os.environ["G2G_CONFIG_PATH"] = "/dev/null/nonexistent-config.ini"
+
     # Provide a dummy token so any incidental GitHub client construction succeeds
     os.environ.setdefault("GITHUB_TOKEN", "dummy")
+
+    # Ensure tests don't write to real GitHub output files
+    if "GITHUB_OUTPUT" not in os.environ:
+        os.environ["GITHUB_OUTPUT"] = "/dev/null"
     _remove_coverage_files(bases)
