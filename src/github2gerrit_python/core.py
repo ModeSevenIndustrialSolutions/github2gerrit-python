@@ -962,6 +962,11 @@ class Orchestrator:
         commit_msg = _insert_issue_id_into_commit_message(
             commit_msg, inputs.issue_id
         )
+        # Add GitHub hash for reliable duplicate detection
+        from .duplicate_detection import DuplicateDetector
+
+        github_hash = DuplicateDetector._generate_github_change_hash(gh)
+        commit_msg += f"\n\nGitHub-Hash: {github_hash}"
         if signed_off:
             commit_msg += "\n\n" + "\n".join(signed_off)
         if reuse_cid:
@@ -1345,11 +1350,13 @@ class Orchestrator:
             if gh.run_id
             else "N/A"
         )
-        message = f"GHPR: {pr_url}\nAction-Run: {run_url}"
+        message = f"GHPR: {pr_url} | Action-Run: {run_url}"
+        log.info("Adding back-reference comment: %s", message)
         for csha in commit_shas:
             if not csha:
                 continue
             try:
+                log.debug("Executing SSH command for commit %s", csha)
                 run_cmd(
                     [
                         "ssh",
@@ -1368,13 +1375,14 @@ class Orchestrator:
                         csha,
                     ]
                 )
-                log.debug(
-                    "Successfully added back-reference comment for %s",
+                log.info(
+                    "Successfully added back-reference comment for %s: %s",
                     csha,
+                    message,
                 )
-            except Exception as exc:
-                log.warning(
-                    "Failed to add back-reference comment for %s: %s", csha, exc
+            except Exception:
+                log.exception(
+                    "Failed to add back-reference comment for %s", csha
                 )
                 # Continue processing - this is not a fatal error
 

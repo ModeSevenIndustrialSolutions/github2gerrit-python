@@ -410,8 +410,17 @@ project=test/project.git
             result = detector.check_gerrit_for_existing_change(gh)
             assert result is True
 
-            # Verify the correct query was made
-            expected_query = 'project:test/project comment:"GHPR: https://github.com/org/repo/pull/123"'
+            # Verify the correct query was made - should search for GitHub hash in message
+            # Hash is SHA256 of "https://github.com/org/repo/pull/123" truncated to 16 chars
+            import hashlib
+
+            hash_input = "https://github.com/org/repo/pull/123"
+            expected_hash = hashlib.sha256(
+                hash_input.encode("utf-8")
+            ).hexdigest()[:16]
+            expected_query = (
+                f'project:test/project message:"GitHub-Hash: {expected_hash}"'
+            )
             mock_rest.get.assert_called_once_with(
                 f"/changes/?q={expected_query}&n=10"
             )
