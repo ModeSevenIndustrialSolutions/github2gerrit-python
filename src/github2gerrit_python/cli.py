@@ -471,10 +471,20 @@ def _process() -> None:
                 with open(gh_out, "a", encoding="utf-8") as fh:
                     v = os.getenv("GERRIT_CHANGE_REQUEST_URL", "")
                     if v:
-                        fh.write(f"gerrit_change_request_url={v}\n")
+                        if "\n" in v and os.getenv("GITHUB_ACTIONS") == "true":
+                            fh.write("gerrit_change_request_url<<G2G\n")
+                            fh.write(f"{v}\n")
+                            fh.write("G2G\n")
+                        else:
+                            fh.write(f"gerrit_change_request_url={v}\n")
                     v = os.getenv("GERRIT_CHANGE_REQUEST_NUM", "")
                     if v:
-                        fh.write(f"gerrit_change_request_num={v}\n")
+                        if "\n" in v and os.getenv("GITHUB_ACTIONS") == "true":
+                            fh.write("gerrit_change_request_num<<G2G\n")
+                            fh.write(f"{v}\n")
+                            fh.write("G2G\n")
+                        else:
+                            fh.write(f"gerrit_change_request_num={v}\n")
             except Exception as exc:
                 log.debug("Failed to write GITHUB_OUTPUT: %s", exc)
 
@@ -639,13 +649,28 @@ def _process() -> None:
                 with open(gh_out, "a", encoding="utf-8") as fh:
                     v = os.getenv("GERRIT_CHANGE_REQUEST_URL", "")
                     if v:
-                        fh.write(f"gerrit_change_request_url={v}\n")
+                        if "\n" in v and os.getenv("GITHUB_ACTIONS") == "true":
+                            fh.write("gerrit_change_request_url<<G2G\n")
+                            fh.write(f"{v}\n")
+                            fh.write("G2G\n")
+                        else:
+                            fh.write(f"gerrit_change_request_url={v}\n")
                     v = os.getenv("GERRIT_CHANGE_REQUEST_NUM", "")
                     if v:
-                        fh.write(f"gerrit_change_request_num={v}\n")
+                        if "\n" in v and os.getenv("GITHUB_ACTIONS") == "true":
+                            fh.write("gerrit_change_request_num<<G2G\n")
+                            fh.write(f"{v}\n")
+                            fh.write("G2G\n")
+                        else:
+                            fh.write(f"gerrit_change_request_num={v}\n")
                     v = os.getenv("GERRIT_COMMIT_SHA", "")
                     if v:
-                        fh.write(f"gerrit_commit_sha={v}\n")
+                        if "\n" in v and os.getenv("GITHUB_ACTIONS") == "true":
+                            fh.write("gerrit_commit_sha<<G2G\n")
+                            fh.write(f"{v}\n")
+                            fh.write("G2G\n")
+                        else:
+                            fh.write(f"gerrit_commit_sha={v}\n")
             except Exception as exc:
                 log.debug("Failed to write GITHUB_OUTPUT: %s", exc)
 
