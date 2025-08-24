@@ -259,6 +259,15 @@ runs:
         set -euo pipefail
         # Note: The Python CLI sets outputs inside its process. If it also writes them
         # to GITHUB_ENV/OUTPUT in a future update, these lines will capture them.
-        echo "gerrit_change_request_url=${GERRIT_CHANGE_REQUEST_URL:-}" >> "$GITHUB_OUTPUT"
-        echo "gerrit_change_request_num=${GERRIT_CHANGE_REQUEST_NUM:-}" >> "$GITHUB_OUTPUT"
-        echo "gerrit_commit_sha=${GERRIT_COMMIT_SHA:-}" >> "$GITHUB_OUTPUT"
+        # Use GitHub Actions multiline output format to support newline values.
+        {
+          echo "gerrit_change_request_url<<G2G"
+          printf '%s\n' "${GERRIT_CHANGE_REQUEST_URL:-}"
+          echo "G2G"
+          echo "gerrit_change_request_num<<G2G"
+          printf '%s\n' "${GERRIT_CHANGE_REQUEST_NUM:-}"
+          echo "G2G"
+          echo "gerrit_commit_sha<<G2G"
+          printf '%s\n' "${GERRIT_COMMIT_SHA:-}"
+          echo "G2G"
+        } >> "$GITHUB_OUTPUT"
