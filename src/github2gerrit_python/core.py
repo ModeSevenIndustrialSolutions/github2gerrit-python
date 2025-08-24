@@ -1117,8 +1117,8 @@ class Orchestrator:
             ]
             for r in revs:
                 args.extend(["--reviewer", r])
-            # Branch flag
-            args.extend(["-b", branch])
+            # Branch as positional argument (not a flag)
+            args.append(branch)
 
             # Use our specific SSH configuration
             env = (
@@ -1346,24 +1346,33 @@ class Orchestrator:
         for csha in commit_shas:
             if not csha:
                 continue
-            run_cmd(
-                [
-                    "ssh",
-                    "-n",
-                    "-p",
-                    str(gerrit.port),
-                    f"{user}@{server}",
-                    "gerrit",
-                    "review",
-                    "-m",
-                    message,
-                    "--branch",
-                    branch,
-                    "--project",
-                    repo.project_gerrit,
-                    csha,
-                ]
-            )
+            try:
+                run_cmd(
+                    [
+                        "ssh",
+                        "-n",
+                        "-p",
+                        str(gerrit.port),
+                        f"{user}@{server}",
+                        "gerrit",
+                        "review",
+                        "-m",
+                        message,
+                        "--branch",
+                        branch,
+                        "--project",
+                        repo.project_gerrit,
+                        csha,
+                    ]
+                )
+                log.debug(
+                    "Successfully added back-reference comment for %s", csha
+                )
+            except Exception as exc:
+                log.warning(
+                    "Failed to add back-reference comment for %s: %s", csha, exc
+                )
+                # Continue processing - this is not a fatal error
 
     def _comment_on_pull_request(
         self,

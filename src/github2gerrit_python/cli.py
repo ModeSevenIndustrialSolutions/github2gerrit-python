@@ -390,7 +390,9 @@ def _process() -> None:
         all_urls: list[str] = []
         all_nums: list[str] = []
 
-        for pr in iter_open_pulls(repo):
+        prs_list = list(iter_open_pulls(repo))
+        log.info("Found %d open PRs to process", len(prs_list))
+        for pr in prs_list:
             pr_number = int(getattr(pr, "number", 0) or 0)
             if pr_number <= 0:
                 continue
@@ -409,6 +411,7 @@ def _process() -> None:
                 pr_number=pr_number,
             )
 
+            log.info("Starting processing of PR #%d", pr_number)
             log.debug(
                 "Processing PR #%d in multi-PR mode with event_name=%s, "
                 "event_action=%s",
@@ -428,25 +431,33 @@ def _process() -> None:
                 continue
 
             # Create temporary directory for git operations per PR
-            with tempfile.TemporaryDirectory() as temp_dir:
-                workspace = Path(temp_dir)
-                orch = Orchestrator(workspace=workspace)
-                result_multi = orch.execute(inputs=data, gh=per_ctx)
-                if result_multi.change_urls:
-                    all_urls.extend(result_multi.change_urls)
-                    # Output URLs immediately for each PR
-                    for url in result_multi.change_urls:
-                        print(f"Gerrit change URL: {url}")
+            try:
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    workspace = Path(temp_dir)
+                    orch = Orchestrator(workspace=workspace)
+                    result_multi = orch.execute(inputs=data, gh=per_ctx)
+                    if result_multi.change_urls:
+                        all_urls.extend(result_multi.change_urls)
+                        # Output URLs immediately for each PR
+                        for url in result_multi.change_urls:
+                            print(f"Gerrit change URL: {url}")
+                            log.info(
+                                "PR #%d created Gerrit change: %s",
+                                pr_number,
+                                url,
+                            )
+                    if result_multi.change_numbers:
+                        all_nums.extend(result_multi.change_numbers)
                         log.info(
-                            "PR #%d created Gerrit change: %s", pr_number, url
+                            "PR #%d change numbers: %s",
+                            pr_number,
+                            result_multi.change_numbers,
                         )
-                if result_multi.change_numbers:
-                    all_nums.extend(result_multi.change_numbers)
-                    log.info(
-                        "PR #%d change numbers: %s",
-                        pr_number,
-                        result_multi.change_numbers,
-                    )
+            except Exception as exc:
+                log.exception("Failed to process PR #%d", pr_number)
+                print(f"Failed to process PR #{pr_number}: {exc}")
+                log.info("Continuing to next PR despite failure")
+                continue
 
         if all_urls:
             os.environ["GERRIT_CHANGE_REQUEST_URL"] = "\n".join(all_urls)
