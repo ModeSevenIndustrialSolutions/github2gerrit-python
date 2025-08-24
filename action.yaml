@@ -62,6 +62,10 @@ inputs:
     description: "Allow submitting duplicate changes without error"
     required: false
     default: "false"
+  ISSUE_ID:
+    description: "Issue ID to include (e.g., ABC-123)"
+    required: false
+    default: ""
 
   # Optional Gerrit overrides (used when .gitreview is missing)
   GERRIT_SERVER:
@@ -222,6 +226,7 @@ runs:
         PRESERVE_GITHUB_PRS: ${{ inputs.PRESERVE_GITHUB_PRS }}
         DRY_RUN: ${{ inputs.DRY_RUN }}
         ALLOW_DUPLICATES: ${{ inputs.ALLOW_DUPLICATES }}
+        ISSUE_ID: ${{ inputs.ISSUE_ID }}
 
         # Optional Gerrit overrides (when .gitreview is missing)
         GERRIT_SERVER: ${{ inputs.GERRIT_SERVER }}

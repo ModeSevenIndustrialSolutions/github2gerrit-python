@@ -50,6 +50,19 @@ refactors it to Python with typed modules and test support.
 - The workflow runs with `pull_request_target` or via
   `workflow_dispatch` using a valid PR context.
 
+### Note on sitecustomize.py
+
+This repository includes a sitecustomize.py that is automatically
+imported by Python’s site initialization. It exists to make pytest and
+coverage runs in CI more robust by:
+
+- assigns a unique COVERAGE_FILE per process to avoid mixing data across runs
+- proactively removing stale .coverage artifacts in common base directories.
+
+The logic runs during pytest sessions and is best effort.
+It never interferes with normal execution. Maintainers can keep it to
+stabilize coverage reporting for parallel/xdist runs.
+
 ## Duplicate detection
 
 By default, the tool checks for duplicate changes to prevent spam
@@ -118,6 +131,7 @@ jobs:
           GERRIT_SSH_USER_G2G_EMAIL: ${{ vars.GERRIT_SSH_USER_G2G_EMAIL }}
           ORGANIZATION: ${{ github.repository_owner }}
           REVIEWERS_EMAIL: ""
+          ISSUE_ID: ""  # Optional: adds 'Issue-ID: ...' trailer to the commit message
 ```
 
 The action reads `.gitreview`. If `.gitreview` is absent, you must
@@ -155,6 +169,8 @@ Key options include:
 - `--dry-run`: Check configuration without making changes
 - `--submit-single-commits`: Submit each commit individually
 - `--use-pr-as-commit`: Use PR title/body as commit message
+- `--issue-id`: Add an Issue-ID trailer (e.g., "Issue-ID: ABC-123")
+  to the commit message
 - `--preserve-github-prs`: Don't close GitHub PRs after submission
 
 ### Debugging and Troubleshooting

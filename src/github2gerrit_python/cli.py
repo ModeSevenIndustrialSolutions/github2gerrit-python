@@ -73,6 +73,16 @@ APP_NAME = "github2gerrit"
 app: typer.Typer = typer.Typer(add_completion=False, no_args_is_help=False)
 
 
+def _resolve_org(default_org: str | None) -> str:
+    if default_org:
+        return default_org
+    gh_owner = os.getenv("GITHUB_REPOSITORY_OWNER")
+    if gh_owner:
+        return gh_owner
+    # Fallback to empty string for compatibility with existing action
+    return ""
+
+
 @app.callback(invoke_without_command=True)  # type: ignore[misc]
 def main(
     ctx: typer.Context,
@@ -315,7 +325,210 @@ def _build_inputs_from_env() -> Inputs:
     )
 
 
-def _process() -> None:
+def _process_bulk(data: Inputs, gh: GitHubContext) -> None:
+    client = build_client()
+    repo = get_repo_from_env(client)
+
+    all_urls: list[str] = []
+    all_nums: list[str] = []
+
+    prs_list = list(iter_open_pulls(repo))
+    log.info("Found %d open PRs to process", len(prs_list))
+    for pr in prs_list:
+        pr_number = int(getattr(pr, "number", 0) or 0)
+        if pr_number <= 0:
+            continue
+
+        per_ctx = models.GitHubContext(
+            event_name=gh.event_name,
+            event_action=gh.event_action,
+            event_path=gh.event_path,
+            repository=gh.repository,
+            repository_owner=gh.repository_owner,
+            server_url=gh.server_url,
+            run_id=gh.run_id,
+            sha=gh.sha,
+            base_ref=gh.base_ref,
+            head_ref=gh.head_ref,
+            pr_number=pr_number,
+        )
+
+        log.info("Starting processing of PR #%d", pr_number)
+        log.debug(
+            "Processing PR #%d in multi-PR mode with event_name=%s, "
+            "event_action=%s",
+            pr_number,
+            gh.event_name,
+            gh.event_action,
+        )
+
+        try:
+            check_for_duplicates(
+                per_ctx, allow_duplicates=data.allow_duplicates
+            )
+        except DuplicateChangeError as exc:
+            log.exception("Skipping PR #%d", pr_number)
+            typer.echo(f"Skipping PR #{pr_number}: {exc}")
+            continue
+
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                workspace = Path(temp_dir)
+                orch = Orchestrator(workspace=workspace)
+                result_multi = orch.execute(inputs=data, gh=per_ctx)
+                if result_multi.change_urls:
+                    all_urls.extend(result_multi.change_urls)
+                    for url in result_multi.change_urls:
+                        typer.echo(f"Gerrit change URL: {url}")
+                        log.info(
+                            "PR #%d created Gerrit change: %s",
+                            pr_number,
+                            url,
+                        )
+                if result_multi.change_numbers:
+                    all_nums.extend(result_multi.change_numbers)
+                    log.info(
+                        "PR #%d change numbers: %s",
+                        pr_number,
+                        result_multi.change_numbers,
+                    )
+        except Exception as exc:
+            log.exception("Failed to process PR #%d", pr_number)
+            typer.echo(f"Failed to process PR #{pr_number}: {exc}")
+            log.info("Continuing to next PR despite failure")
+            continue
+
+    if all_urls:
+        os.environ["GERRIT_CHANGE_REQUEST_URL"] = "\n".join(all_urls)
+    if all_nums:
+        os.environ["GERRIT_CHANGE_REQUEST_NUM"] = "\n".join(all_nums)
+
+    _append_github_output(
+        {
+            "gerrit_change_request_url": os.getenv(
+                "GERRIT_CHANGE_REQUEST_URL", ""
+            ),
+            "gerrit_change_request_num": os.getenv(
+                "GERRIT_CHANGE_REQUEST_NUM", ""
+            ),
+        }
+    )
+
+    log.info("Submission pipeline complete (multi-PR).")
+    return
+
+
+def _process_single(data: Inputs, gh: GitHubContext) -> None:
+    # Create temporary directory for all git operations
+    with tempfile.TemporaryDirectory() as temp_dir:
+        workspace = Path(temp_dir)
+
+        try:
+            _prepare_local_checkout(workspace, gh, data)
+        except Exception as exc:
+            log.debug("Local checkout preparation failed: %s", exc)
+
+        orch = Orchestrator(workspace=workspace)
+        try:
+            result = orch.execute(inputs=data, gh=gh)
+        except Exception as exc:
+            log.debug("Execution failed; continuing to write outputs: %s", exc)
+
+            result = SubmissionResult(
+                change_urls=[], change_numbers=[], commit_shas=[]
+            )
+        if result.change_urls:
+            os.environ["GERRIT_CHANGE_REQUEST_URL"] = "\n".join(
+                result.change_urls
+            )
+            # Output Gerrit change URL(s) to console
+            for url in result.change_urls:
+                typer.echo(f"Gerrit change URL: {url}")
+        if result.change_numbers:
+            os.environ["GERRIT_CHANGE_REQUEST_NUM"] = "\n".join(
+                result.change_numbers
+            )
+
+        # Also write outputs to GITHUB_OUTPUT if available
+        _append_github_output(
+            {
+                "gerrit_change_request_url": os.getenv(
+                    "GERRIT_CHANGE_REQUEST_URL", ""
+                ),
+                "gerrit_change_request_num": os.getenv(
+                    "GERRIT_CHANGE_REQUEST_NUM", ""
+                ),
+                "gerrit_commit_sha": os.getenv("GERRIT_COMMIT_SHA", ""),
+            }
+        )
+
+        log.info("Submission pipeline complete.")
+        return
+
+
+def _prepare_local_checkout(
+    workspace: Path, gh: GitHubContext, data: Inputs
+) -> None:
+    repo_full = gh.repository.strip() if gh.repository else ""
+    server_url = gh.server_url or os.getenv(
+        "GITHUB_SERVER_URL", "https://github.com"
+    )
+    server_url = (server_url or "https://github.com").rstrip("/")
+    base_ref = gh.base_ref or ""
+    pr_num_str: str = str(gh.pr_number) if gh.pr_number else "0"
+
+    if not repo_full:
+        return
+
+    repo_url = f"{server_url}/{repo_full}.git"
+    run_cmd(["git", "init"], cwd=workspace)
+    run_cmd(["git", "remote", "add", "origin", repo_url], cwd=workspace)
+
+    # Fetch base branch and PR head
+    if base_ref:
+        try:
+            branch_ref = f"refs/heads/{base_ref}:refs/remotes/origin/{base_ref}"
+            run_cmd(
+                [
+                    "git",
+                    "fetch",
+                    f"--depth={data.fetch_depth}",
+                    "origin",
+                    branch_ref,
+                ],
+                cwd=workspace,
+            )
+        except Exception as exc:
+            log.debug("Base branch fetch failed for %s: %s", base_ref, exc)
+
+    if pr_num_str:
+        pr_ref = (
+            f"refs/pull/{pr_num_str}/head:"
+            f"refs/remotes/origin/pr/{pr_num_str}/head"
+        )
+        run_cmd(
+            [
+                "git",
+                "fetch",
+                f"--depth={data.fetch_depth}",
+                "origin",
+                pr_ref,
+            ],
+            cwd=workspace,
+        )
+        run_cmd(
+            [
+                "git",
+                "checkout",
+                "-B",
+                "g2g_pr_head",
+                f"refs/remotes/origin/pr/{pr_num_str}/head",
+            ],
+            cwd=workspace,
+        )
+
+
+def _load_effective_inputs() -> Inputs:
     # Build inputs from environment (used by URL callback path)
     data = _build_inputs_from_env()
 
@@ -327,6 +540,7 @@ def _process() -> None:
     )
     cfg = load_org_config(org_for_cfg)
     apply_config_to_env(cfg)
+
     # Refresh inputs after applying configuration to environment
     data = _build_inputs_from_env()
 
@@ -362,152 +576,29 @@ def _process() -> None:
         except Exception as exc:
             log.debug("Could not derive reviewers from git config: %s", exc)
 
-    # Validate inputs
+    return data
+
+
+def _append_github_output(outputs: dict[str, str]) -> None:
+    gh_out = os.getenv("GITHUB_OUTPUT")
+    if not gh_out:
+        return
     try:
-        _validate_inputs(data)
-    except typer.BadParameter as exc:
-        log.exception("Validation failed")
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=2) from exc
+        with open(gh_out, "a", encoding="utf-8") as fh:
+            for key, val in outputs.items():
+                if not val:
+                    continue
+                if "\n" in val:
+                    fh.write(f"{key}<<G2G\n")
+                    fh.write(f"{val}\n")
+                    fh.write("G2G\n")
+                else:
+                    fh.write(f"{key}={val}\n")
+    except Exception as exc:
+        log.debug("Failed to write GITHUB_OUTPUT: %s", exc)
 
-    gh = _read_github_context()
-    _log_effective_config(data, gh)
 
-    # Test mode: short-circuit after validation
-    if _env_bool("G2G_TEST_MODE", False):
-        log.info("Validation complete. Ready to execute submission pipeline.")
-        typer.echo("Validation complete. Ready to execute submission pipeline.")
-        return
-
-    # Bulk mode for URL/workflow_dispatch
-    sync_all = _env_bool("SYNC_ALL_OPEN_PRS", False)
-    if sync_all and (
-        gh.event_name == "workflow_dispatch" or os.getenv("G2G_TARGET_URL")
-    ):
-        client = build_client()
-        repo = get_repo_from_env(client)
-
-        all_urls: list[str] = []
-        all_nums: list[str] = []
-
-        prs_list = list(iter_open_pulls(repo))
-        log.info("Found %d open PRs to process", len(prs_list))
-        for pr in prs_list:
-            pr_number = int(getattr(pr, "number", 0) or 0)
-            if pr_number <= 0:
-                continue
-
-            per_ctx = models.GitHubContext(
-                event_name=gh.event_name,
-                event_action=gh.event_action,
-                event_path=gh.event_path,
-                repository=gh.repository,
-                repository_owner=gh.repository_owner,
-                server_url=gh.server_url,
-                run_id=gh.run_id,
-                sha=gh.sha,
-                base_ref=gh.base_ref,
-                head_ref=gh.head_ref,
-                pr_number=pr_number,
-            )
-
-            log.info("Starting processing of PR #%d", pr_number)
-            log.debug(
-                "Processing PR #%d in multi-PR mode with event_name=%s, "
-                "event_action=%s",
-                pr_number,
-                gh.event_name,
-                gh.event_action,
-            )
-
-            # Check for duplicates before processing
-            try:
-                check_for_duplicates(
-                    per_ctx, allow_duplicates=data.allow_duplicates
-                )
-            except DuplicateChangeError as exc:
-                log.exception("Skipping PR #%d", pr_number)
-                print(f"Skipping PR #{pr_number}: {exc}")
-                continue
-
-            # Create temporary directory for git operations per PR
-            try:
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    workspace = Path(temp_dir)
-                    orch = Orchestrator(workspace=workspace)
-                    result_multi = orch.execute(inputs=data, gh=per_ctx)
-                    if result_multi.change_urls:
-                        all_urls.extend(result_multi.change_urls)
-                        # Output URLs immediately for each PR
-                        for url in result_multi.change_urls:
-                            print(f"Gerrit change URL: {url}")
-                            log.info(
-                                "PR #%d created Gerrit change: %s",
-                                pr_number,
-                                url,
-                            )
-                    if result_multi.change_numbers:
-                        all_nums.extend(result_multi.change_numbers)
-                        log.info(
-                            "PR #%d change numbers: %s",
-                            pr_number,
-                            result_multi.change_numbers,
-                        )
-            except Exception as exc:
-                log.exception("Failed to process PR #%d", pr_number)
-                print(f"Failed to process PR #{pr_number}: {exc}")
-                log.info("Continuing to next PR despite failure")
-                continue
-
-        if all_urls:
-            os.environ["GERRIT_CHANGE_REQUEST_URL"] = "\n".join(all_urls)
-        if all_nums:
-            os.environ["GERRIT_CHANGE_REQUEST_NUM"] = "\n".join(all_nums)
-
-        # Also write outputs to GITHUB_OUTPUT if available
-        gh_out = os.getenv("GITHUB_OUTPUT")
-        if gh_out:
-            try:
-                with open(gh_out, "a", encoding="utf-8") as fh:
-                    v = os.getenv("GERRIT_CHANGE_REQUEST_URL", "")
-                    if v:
-                        if "\n" in v and os.getenv("GITHUB_ACTIONS") == "true":
-                            fh.write("gerrit_change_request_url<<G2G\n")
-                            fh.write(f"{v}\n")
-                            fh.write("G2G\n")
-                        else:
-                            fh.write(f"gerrit_change_request_url={v}\n")
-                    v = os.getenv("GERRIT_CHANGE_REQUEST_NUM", "")
-                    if v:
-                        if "\n" in v and os.getenv("GITHUB_ACTIONS") == "true":
-                            fh.write("gerrit_change_request_num<<G2G\n")
-                            fh.write(f"{v}\n")
-                            fh.write("G2G\n")
-                        else:
-                            fh.write(f"gerrit_change_request_num={v}\n")
-            except Exception as exc:
-                log.debug("Failed to write GITHUB_OUTPUT: %s", exc)
-
-        log.info("Submission pipeline complete (multi-PR).")
-        return
-
-    if not gh.pr_number:
-        log.error(
-            "PR_NUMBER is empty. This tool requires a valid pull request "
-            "context. Current event: %s",
-            gh.event_name,
-        )
-        typer.echo(
-            "PR_NUMBER is empty. This tool requires a valid pull request "
-            f"context. Current event: {gh.event_name}",
-            err=True,
-        )
-        raise typer.Exit(code=2)
-
-    # Test mode handled earlier
-
-    # Execute single-PR submission
-    # Augment PR refs via API when in URL mode and token present
+def _augment_pr_refs_if_needed(gh: GitHubContext) -> GitHubContext:
     if (
         os.getenv("G2G_TARGET_URL")
         and gh.pr_number
@@ -535,9 +626,58 @@ def _process() -> None:
             if head_sha:
                 os.environ["GITHUB_SHA"] = head_sha
                 log.info("Resolved head sha via GitHub API: %s", head_sha)
-            gh = _read_github_context()
+            return _read_github_context()
         except Exception as exc:
             log.debug("Could not resolve PR refs via GitHub API: %s", exc)
+    return gh
+
+
+def _process() -> None:
+    data = _load_effective_inputs()
+
+    # Validate inputs
+    try:
+        _validate_inputs(data)
+    except typer.BadParameter as exc:
+        log.exception("Validation failed")
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    gh = _read_github_context()
+    _log_effective_config(data, gh)
+
+    # Test mode: short-circuit after validation
+    if _env_bool("G2G_TEST_MODE", False):
+        log.info("Validation complete. Ready to execute submission pipeline.")
+        typer.echo("Validation complete. Ready to execute submission pipeline.")
+        return
+
+    # Bulk mode for URL/workflow_dispatch
+    sync_all = _env_bool("SYNC_ALL_OPEN_PRS", False)
+    if sync_all and (
+        gh.event_name == "workflow_dispatch" or os.getenv("G2G_TARGET_URL")
+    ):
+        _process_bulk(data, gh)
+        return
+
+    if not gh.pr_number:
+        log.error(
+            "PR_NUMBER is empty. This tool requires a valid pull request "
+            "context. Current event: %s",
+            gh.event_name,
+        )
+        typer.echo(
+            "PR_NUMBER is empty. This tool requires a valid pull request "
+            f"context. Current event: {gh.event_name}",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    # Test mode handled earlier
+
+    # Execute single-PR submission
+    # Augment PR refs via API when in URL mode and token present
+    gh = _augment_pr_refs_if_needed(gh)
 
     # Check for duplicates in single-PR mode (before workspace setup)
     if gh.pr_number and not _env_bool("SYNC_ALL_OPEN_PRS", False):
@@ -551,131 +691,8 @@ def _process() -> None:
             )
             raise typer.Exit(code=3) from exc
 
-    # Create temporary directory for all git operations
-    with tempfile.TemporaryDirectory() as temp_dir:
-        workspace = Path(temp_dir)
-
-        try:
-            repo_full = gh.repository.strip() if gh.repository else ""
-            server_url = gh.server_url or os.getenv(
-                "GITHUB_SERVER_URL", "https://github.com"
-            )
-            server_url = (server_url or "https://github.com").rstrip("/")
-            base_ref = gh.base_ref or ""
-            pr_num_str: str = str(gh.pr_number) if gh.pr_number else "0"
-
-            if repo_full:
-                # Clone the repo if we don't already have it checked out
-                repo_url = f"{server_url}/{repo_full}.git"
-                run_cmd(["git", "init"], cwd=workspace)
-                run_cmd(
-                    ["git", "remote", "add", "origin", repo_url], cwd=workspace
-                )
-
-                # Fetch base branch and PR head
-                if base_ref:
-                    try:
-                        branch_ref = (
-                            f"refs/heads/{base_ref}:"
-                            f"refs/remotes/origin/{base_ref}"
-                        )
-                        run_cmd(
-                            [
-                                "git",
-                                "fetch",
-                                f"--depth={data.fetch_depth}",
-                                "origin",
-                                branch_ref,
-                            ],
-                            cwd=workspace,
-                        )
-                    except Exception as exc:
-                        log.debug(
-                            "Base branch fetch failed for %s: %s", base_ref, exc
-                        )
-                if pr_num_str:
-                    pr_ref = (
-                        f"refs/pull/{pr_num_str}/head:refs/remotes/origin/pr/"
-                        f"{pr_num_str}/head"
-                    )
-                    run_cmd(
-                        [
-                            "git",
-                            "fetch",
-                            f"--depth={data.fetch_depth}",
-                            "origin",
-                            pr_ref,
-                        ],
-                        cwd=workspace,
-                    )
-                    run_cmd(
-                        [
-                            "git",
-                            "checkout",
-                            "-B",
-                            "g2g_pr_head",
-                            f"refs/remotes/origin/pr/{pr_num_str}/head",
-                        ],
-                        cwd=workspace,
-                    )
-        except Exception as exc:
-            log.debug("Local checkout preparation failed: %s", exc)
-
-        orch = Orchestrator(workspace=workspace)
-        try:
-            result = orch.execute(inputs=data, gh=gh)
-        except Exception as exc:
-            log.debug("Execution failed; continuing to write outputs: %s", exc)
-
-            result = SubmissionResult(
-                change_urls=[], change_numbers=[], commit_shas=[]
-            )
-        if result.change_urls:
-            os.environ["GERRIT_CHANGE_REQUEST_URL"] = "\n".join(
-                result.change_urls
-            )
-            # Output Gerrit change URL(s) to console
-            for url in result.change_urls:
-                print(f"Gerrit change URL: {url}")
-        if result.change_numbers:
-            os.environ["GERRIT_CHANGE_REQUEST_NUM"] = "\n".join(
-                result.change_numbers
-            )
-
-        # Also write outputs to GITHUB_OUTPUT if available
-        gh_out = os.getenv("GITHUB_OUTPUT")
-        if gh_out:
-            try:
-                with open(gh_out, "a", encoding="utf-8") as fh:
-                    v = os.getenv("GERRIT_CHANGE_REQUEST_URL", "")
-                    if v:
-                        if "\n" in v and os.getenv("GITHUB_ACTIONS") == "true":
-                            fh.write("gerrit_change_request_url<<G2G\n")
-                            fh.write(f"{v}\n")
-                            fh.write("G2G\n")
-                        else:
-                            fh.write(f"gerrit_change_request_url={v}\n")
-                    v = os.getenv("GERRIT_CHANGE_REQUEST_NUM", "")
-                    if v:
-                        if "\n" in v and os.getenv("GITHUB_ACTIONS") == "true":
-                            fh.write("gerrit_change_request_num<<G2G\n")
-                            fh.write(f"{v}\n")
-                            fh.write("G2G\n")
-                        else:
-                            fh.write(f"gerrit_change_request_num={v}\n")
-                    v = os.getenv("GERRIT_COMMIT_SHA", "")
-                    if v:
-                        if "\n" in v and os.getenv("GITHUB_ACTIONS") == "true":
-                            fh.write("gerrit_commit_sha<<G2G\n")
-                            fh.write(f"{v}\n")
-                            fh.write("G2G\n")
-                        else:
-                            fh.write(f"gerrit_commit_sha={v}\n")
-            except Exception as exc:
-                log.debug("Failed to write GITHUB_OUTPUT: %s", exc)
-
-        log.info("Submission pipeline complete.")
-        return
+    _process_single(data, gh)
+    return
 
 
 def _mask_secret(value: str, keep: int = 4) -> str:
@@ -816,16 +833,6 @@ def _log_effective_config(data: Inputs, gh: GitHubContext) -> None:
     log.info("  base_ref: %s", gh.base_ref)
     log.info("  head_ref: %s", gh.head_ref)
     log.info("  sha: %s", gh.sha)
-
-
-def _resolve_org(default_org: str | None) -> str:
-    if default_org:
-        return default_org
-    gh_owner = os.getenv("GITHUB_REPOSITORY_OWNER")
-    if gh_owner:
-        return gh_owner
-    # Fallback to empty string for compatibility with existing action
-    return ""
 
 
 if __name__ == "__main__":

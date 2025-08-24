@@ -35,8 +35,6 @@ __all__ = [
     "git_config_get",
     "git_config_get_all",
     "git_last_commit_trailers",
-    "git_log",
-    "git_reset_soft",
     "git_show",
     "mask_text",
     "run_cmd",
@@ -404,19 +402,6 @@ def git_config(
             ) from exc
 
 
-def git_reset_soft(ref: str, *, cwd: Path | None = None) -> None:
-    try:
-        git(["reset", "--soft", ref], cwd=cwd)
-    except CommandError as exc:
-        raise GitError(  # noqa: TRY003
-            f"git reset --soft {ref} failed",
-            cmd=exc.cmd,
-            returncode=exc.returncode,
-            stdout=exc.stdout,
-            stderr=exc.stderr,
-        ) from exc
-
-
 def git_cherry_pick(
     commit: str,
     *,
@@ -529,33 +514,6 @@ def git_show(
     except CommandError as exc:
         raise GitError(  # noqa: TRY003
             f"git show {rev} failed",
-            cmd=exc.cmd,
-            returncode=exc.returncode,
-            stdout=exc.stdout,
-            stderr=exc.stderr,
-        ) from exc
-    else:
-        return res.stdout
-
-
-def git_log(
-    *,
-    cwd: Path | None = None,
-    n: int = 1,
-    pretty: str | None = None,
-    additional_args: Sequence[str] | None = None,
-) -> str:
-    """Run git log with common options."""
-    args: list[str] = ["log", f"-n{n}"]
-    if pretty:
-        args.extend(["--pretty", pretty])
-    if additional_args:
-        args.extend(additional_args)
-    try:
-        res = git(args, cwd=cwd)
-    except CommandError as exc:
-        raise GitError(  # noqa: TRY003
-            "git log failed",
             cmd=exc.cmd,
             returncode=exc.returncode,
             stdout=exc.stdout,
