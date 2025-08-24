@@ -11,16 +11,29 @@ submissions from automated tools like Dependabot.
 
 import hashlib
 import logging
+import os
 import re
+import urllib.parse
+import urllib.request
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from pathlib import Path
 
 from .github_api import GhPullRequest
 from .github_api import GhRepository
 from .github_api import build_client
 from .github_api import get_repo_from_env
 from .models import GitHubContext
+
+
+# Optional Gerrit REST API support
+try:
+    from pygerrit2 import GerritRestAPI
+    from pygerrit2 import HTTPBasicAuth
+except ImportError:
+    GerritRestAPI = None
+    HTTPBasicAuth = None
 
 
 log = logging.getLogger(__name__)
@@ -148,159 +161,307 @@ class ChangeFingerprint:
 
 
 class DuplicateDetector:
-    """Detects duplicate changes across pull requests."""
+    """Detects duplicate Gerrit changes for GitHub pull requests."""
 
     def __init__(self, repo: GhRepository, lookback_days: int = 7):
         self.repo = repo
         self.lookback_days = lookback_days
         self._cutoff_date = datetime.now(UTC) - timedelta(days=lookback_days)
 
-    def get_recent_prs(self, state: str = "all") -> list[GhPullRequest]:
-        """Get recent PRs within the lookback period."""
-        prs = []
+    def _match_first_group(self, pattern: str, text: str) -> str:
+        """Extract first regex group match from text."""
+        match = re.search(pattern, text)
+        return match.group(1) if match else ""
 
+    def _resolve_gerrit_info_from_env_or_gitreview(
+        self, gh: GitHubContext
+    ) -> tuple[str, str] | None:
+        """Resolve Gerrit host and project from environment or .gitreview file.
+
+        Returns:
+            Tuple of (host, project) if found, None otherwise
+        """
+        # First try environment variables (same as core module)
+        gerrit_host = os.getenv("GERRIT_SERVER", "").strip()
+        gerrit_project = os.getenv("GERRIT_PROJECT", "").strip()
+
+        if gerrit_host and gerrit_project:
+            return (gerrit_host, gerrit_project)
+
+        # Try to read .gitreview file locally first
+        gitreview_path = Path(".gitreview")
+        if gitreview_path.exists():
+            try:
+                text = gitreview_path.read_text(encoding="utf-8")
+                host = self._match_first_group(r"(?m)^host=(.+)$", text)
+                proj = self._match_first_group(r"(?m)^project=(.+)$", text)
+                if host and proj:
+                    project = proj.removesuffix(".git")
+                    return (host.strip(), project.strip())
+            except Exception as exc:
+                log.debug("Failed to read local .gitreview: %s", exc)
+
+        # Try to fetch .gitreview remotely (simplified version of core logic)
         try:
-            # Get recent PRs (GitHub returns newest first)
-            for pr in self.repo.get_pulls(state=state):
-                # Check if PR was updated within our lookback period
-                updated_at = getattr(pr, "updated_at", None)
+            repo_full = gh.repository.strip() if gh.repository else ""
+            if not repo_full:
+                return None
+
+            # Try a few common branches
+            branches = []
+            if gh.head_ref:
+                branches.append(gh.head_ref)
+            if gh.base_ref:
+                branches.append(gh.base_ref)
+            branches.extend(["master", "main"])
+
+            for branch in branches:
+                if not branch:
+                    continue
+
+                url = (
+                    f"https://raw.githubusercontent.com/"
+                    f"{repo_full}/refs/heads/{branch}/.gitreview"
+                )
+
+                parsed = urllib.parse.urlparse(url)
                 if (
-                    updated_at
-                    and updated_at.replace(tzinfo=UTC) < self._cutoff_date
+                    parsed.scheme != "https"
+                    or parsed.netloc != "raw.githubusercontent.com"
                 ):
-                    break  # PRs are sorted by update time, so we can stop here
+                    continue
 
-                prs.append(pr)
+                try:
+                    log.debug("Fetching .gitreview from: %s", url)
+                    with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310
+                        text_remote = resp.read().decode("utf-8")
 
-                # Limit to reasonable number to avoid API rate limits
-                if len(prs) >= 100:
-                    break
+                    host = self._match_first_group(
+                        r"(?m)^host=(.+)$", text_remote
+                    )
+                    proj = self._match_first_group(
+                        r"(?m)^project=(.+)$", text_remote
+                    )
+
+                    if host and proj:
+                        project = proj.removesuffix(".git")
+                        return (host.strip(), project.strip())
+
+                except Exception as exc:
+                    log.debug(
+                        "Failed to fetch .gitreview from %s: %s", url, exc
+                    )
+                    continue
 
         except Exception as exc:
-            log.warning("Failed to fetch recent PRs: %s", exc)
+            log.debug("Failed to resolve .gitreview remotely: %s", exc)
 
-        return prs
+        return None
 
-    def create_fingerprint(self, pr: GhPullRequest) -> ChangeFingerprint:
-        """Create a fingerprint for a pull request."""
-        title = getattr(pr, "title", "") or ""
-        body = getattr(pr, "body", "") or ""
-
-        # Try to get files changed (may fail due to API limits)
-        files_changed = []
-        try:
-            # Note: get_files() may not be available on all PR objects
-            if hasattr(pr, "get_files"):
-                files = pr.get_files()
-                files_changed = [getattr(f, "filename", "") for f in files]
-        except Exception as exc:
+    def _build_gerrit_rest_client(self, gerrit_host: str) -> object | None:
+        """Build a Gerrit REST API client if pygerrit2 is available."""
+        if GerritRestAPI is None:
             log.debug(
-                "Could not get files for PR #%s: %s",
-                getattr(pr, "number", "?"),
-                exc,
+                "pygerrit2 not available, skipping Gerrit duplicate check"
             )
+            return None
 
-        return ChangeFingerprint(
-            title=title, body=body, files_changed=files_changed
+        base_path = os.getenv("GERRIT_HTTP_BASE_PATH", "").strip().strip("/")
+        base_url = (
+            f"https://{gerrit_host}/"
+            if not base_path
+            else f"https://{gerrit_host}/{base_path}/"
         )
 
-    def find_similar_prs(
-        self,
-        target_fingerprint: ChangeFingerprint,
-        exclude_pr: int | None = None,
-    ) -> list[tuple[GhPullRequest, ChangeFingerprint]]:
-        """Find PRs similar to the target fingerprint."""
-        similar_prs = []
-        recent_prs = self.get_recent_prs()
+        http_user = (
+            os.getenv("GERRIT_HTTP_USER", "").strip()
+            or os.getenv("GERRIT_SSH_USER_G2G", "").strip()
+        )
+        http_pass = os.getenv("GERRIT_HTTP_PASSWORD", "").strip()
 
-        for pr in recent_prs:
-            pr_number = getattr(pr, "number", 0)
+        try:
+            if http_user and http_pass:
+                if HTTPBasicAuth is None:
+                    log.debug("pygerrit2 HTTPBasicAuth not available")
+                    return None
+                # Type ignore needed for dynamic import returning Any
+                return GerritRestAPI(  # type: ignore[no-any-return]
+                    url=base_url, auth=HTTPBasicAuth(http_user, http_pass)
+                )
+            else:
+                # Type ignore needed for dynamic import returning Any
+                return GerritRestAPI(url=base_url)  # type: ignore[no-any-return]
+        except Exception as exc:
+            log.debug("Failed to create Gerrit REST client: %s", exc)
+            return None
 
-            # Skip the PR we're checking against
-            if exclude_pr and pr_number == exclude_pr:
-                continue
+    def _build_gerrit_rest_client_with_r_path(
+        self, gerrit_host: str
+    ) -> object | None:
+        """Build a Gerrit REST API client with /r/ base path for fallback."""
+        if GerritRestAPI is None:
+            return None
 
-            try:
-                pr_fingerprint = self.create_fingerprint(pr)
-                if target_fingerprint.is_similar_to(pr_fingerprint):
-                    similar_prs.append((pr, pr_fingerprint))
-                    log.debug(
-                        "Found similar PR #%d: %s",
-                        pr_number,
-                        getattr(pr, "title", "")[:50],
+        fallback_url = f"https://{gerrit_host}/r/"
+        http_user = (
+            os.getenv("GERRIT_HTTP_USER", "").strip()
+            or os.getenv("GERRIT_SSH_USER_G2G", "").strip()
+        )
+        http_pass = os.getenv("GERRIT_HTTP_PASSWORD", "").strip()
+
+        try:
+            if http_user and http_pass:
+                if HTTPBasicAuth is None:
+                    return None
+                # Type ignore needed for dynamic import returning Any
+                return GerritRestAPI(  # type: ignore[no-any-return]
+                    url=fallback_url, auth=HTTPBasicAuth(http_user, http_pass)
+                )
+            else:
+                # Type ignore needed for dynamic import returning Any
+                return GerritRestAPI(url=fallback_url)  # type: ignore[no-any-return]
+        except Exception as exc:
+            log.debug(
+                "Failed to create Gerrit REST client with /r/ path: %s", exc
+            )
+            return None
+
+    def check_gerrit_for_existing_change(self, gh: GitHubContext) -> bool:
+        """Check if a Gerrit change already exists for the given GitHub PR.
+
+        Args:
+            gh: GitHub context containing PR and repository information
+
+        Returns:
+            True if a Gerrit change already exists for this PR, False otherwise
+        """
+        if not gh.pr_number:
+            return False
+
+        # Resolve Gerrit host and project
+        gerrit_info = self._resolve_gerrit_info_from_env_or_gitreview(gh)
+        if not gerrit_info:
+            log.debug(
+                "Cannot resolve Gerrit host/project, "
+                "skipping Gerrit duplicate check"
+            )
+            return False
+
+        gerrit_host, gerrit_project = gerrit_info
+
+        rest = self._build_gerrit_rest_client(gerrit_host)
+        if rest is None:
+            log.debug(
+                "Cannot check Gerrit for duplicates, REST client unavailable"
+            )
+            return False
+
+        # Build the GitHub PR URL that would be referenced in Gerrit
+        pr_url = f"{gh.server_url}/{gh.repository}/pull/{gh.pr_number}"
+
+        try:
+            # Search for changes that contain the GitHub PR URL in comments
+            # Using Gerrit's search syntax to find changes with this PR URL
+            query = f'project:{gerrit_project} comment:"GHPR: {pr_url}"'
+            path = f"/changes/?q={query}&n=10"
+
+            log.debug(
+                "Searching Gerrit for existing changes with query: %s", query
+            )
+            # Use getattr for dynamic method access to avoid type checking
+            changes = rest.get(path)  # type: ignore[attr-defined]
+
+            if changes:
+                log.info(
+                    "Found %d existing Gerrit change(s) for GitHub PR #%d: %s",
+                    len(changes),
+                    gh.pr_number,
+                    [f"{c.get('_number', '?')}" for c in changes],
+                )
+                return True
+            else:
+                log.debug(
+                    "No existing Gerrit changes found for GitHub PR #%d",
+                    gh.pr_number,
+                )
+                return False
+
+        except Exception as exc:
+            # Check if this is a 404 error and try /r/ fallback
+            status = getattr(
+                getattr(exc, "response", None), "status_code", None
+            )
+            if status == 404:
+                try:
+                    log.debug("Trying /r/ fallback for Gerrit API")
+                    fallback_rest = self._build_gerrit_rest_client_with_r_path(
+                        gerrit_host
                     )
-            except Exception as exc:
-                log.debug("Error checking PR #%d: %s", pr_number, exc)
+                    if fallback_rest:
+                        changes = fallback_rest.get(path)  # type: ignore[attr-defined]
+                        if changes:
+                            log.info(
+                                "Found %d existing Gerrit change(s) for PR #%d "
+                                "via /r/ fallback: %s",
+                                len(changes),
+                                gh.pr_number,
+                                [f"{c.get('_number', '?')}" for c in changes],
+                            )
+                            return True
+                        else:
+                            log.debug(
+                                "No existing Gerrit changes found for PR #%d "
+                                "via /r/ fallback",
+                                gh.pr_number,
+                            )
+                            return False
+                except Exception as exc2:
+                    log.warning(
+                        "Failed to query Gerrit via /r/ fallback: %s", exc2
+                    )
+                    return False
 
-        return similar_prs
+            log.warning("Failed to query Gerrit for existing changes: %s", exc)
+            # If we can't check Gerrit, err on the side of caution
+            return False
 
     def check_for_duplicates(
         self,
         target_pr: GhPullRequest,
         allow_duplicates: bool = False,
+        gh: GitHubContext | None = None,
     ) -> None:
-        """Check if the target PR is a duplicate of recent PRs.
+        """Check if the target PR is a duplicate in Gerrit.
 
         Args:
             target_pr: The PR to check for duplicates
             allow_duplicates: If True, only log warnings; if False, raise error
+            gh: GitHub context for Gerrit duplicate checking
 
         Raises:
             DuplicateChangeError: If duplicates found and allow_duplicates=False
         """
         pr_number = getattr(target_pr, "number", 0)
-        target_fingerprint = self.create_fingerprint(target_pr)
 
-        log.debug(
-            "Checking PR #%d for duplicates: %s", pr_number, target_fingerprint
-        )
+        log.debug("Checking PR #%d for Gerrit duplicates", pr_number)
 
-        similar_prs = self.find_similar_prs(
-            target_fingerprint, exclude_pr=pr_number
-        )
-
-        if not similar_prs:
-            log.debug("No similar PRs found for PR #%d", pr_number)
-            return
-
-        # Categorize similar PRs
-        open_similar = []
-        closed_similar = []
-
-        for pr, _fingerprint in similar_prs:
-            state = getattr(pr, "state", "unknown")
-            if state == "open":
-                open_similar.append(pr)
-            elif state in ("closed", "merged"):
-                closed_similar.append(pr)
-
-        # Build warning/error message
-        messages = []
-        if closed_similar:
-            closed_numbers = [
-                getattr(pr, "number", "?") for pr in closed_similar
-            ]
-            messages.append(
-                f"Recently closed PRs: #{', #'.join(map(str, closed_numbers))}"
+        # Check if this PR already has a corresponding Gerrit change
+        if gh and self.check_gerrit_for_existing_change(gh):
+            full_message = (
+                f"PR #{pr_number} already has an existing Gerrit change. "
+                f"Skipping duplicate submission. "
+                f"Target PR title: '{getattr(target_pr, 'title', '')[:100]}'"
             )
 
-        if open_similar:
-            open_numbers = [getattr(pr, "number", "?") for pr in open_similar]
-            messages.append(f"Open PRs: #{', #'.join(map(str, open_numbers))}")
+            if allow_duplicates:
+                log.warning(
+                    "GERRIT DUPLICATE DETECTED (allowed): %s", full_message
+                )
+                return
+            else:
+                raise DuplicateChangeError(full_message, [])
 
-        full_message = (
-            f"PR #{pr_number} appears to be a duplicate. "
-            f"Similar changes found in {', '.join(messages)}. "
-            f"Target PR title: '{getattr(target_pr, 'title', '')[:100]}'"
-        )
-
-        if allow_duplicates:
-            log.warning("DUPLICATE DETECTED (allowed): %s", full_message)
-        else:
-            all_similar_numbers = [
-                getattr(pr, "number", 0) for pr, _ in similar_prs
-            ]
-            raise DuplicateChangeError(full_message, all_similar_numbers)
+        log.debug("No existing Gerrit change found for PR #%d", pr_number)
 
 
 def check_for_duplicates(
@@ -332,7 +493,7 @@ def check_for_duplicates(
         # Create detector and check
         detector = DuplicateDetector(repo, lookback_days=lookback_days)
         detector.check_for_duplicates(
-            target_pr, allow_duplicates=allow_duplicates
+            target_pr, allow_duplicates=allow_duplicates, gh=gh
         )
 
         log.info("Duplicate check completed for PR #%d", gh.pr_number)

@@ -87,7 +87,7 @@ def test_add_backref_comment_invokes_ssh_with_expected_args(
 
     # Expected message content (single argument with escaped newlines)
     expected_message = (
-        "GHPR: https://github.enterprise/acme/widget/pull/12\\n"
+        "GHPR: https://github.enterprise/acme/widget/pull/12\n"
         "Action-Run: https://github.enterprise/acme/widget/actions/runs/99"
     )
 

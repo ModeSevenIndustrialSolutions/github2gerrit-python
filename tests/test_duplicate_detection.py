@@ -126,7 +126,16 @@ class TestDuplicateDetector:
     def _create_mock_repo(self, prs: list[Any]) -> Any:
         """Create a mock repository with given PRs."""
         repo = Mock()
-        repo.get_pulls.return_value = prs
+
+        def get_pulls_with_state(state: str = "all") -> list[Any]:
+            if state == "open":
+                return [pr for pr in prs if pr.state == "open"]
+            elif state == "closed":
+                return [pr for pr in prs if pr.state in ("closed", "merged")]
+            else:  # state == "all"
+                return prs
+
+        repo.get_pulls.side_effect = get_pulls_with_state
         repo.get_pull.side_effect = lambda num: next(
             pr for pr in prs if pr.number == num
         )
@@ -146,98 +155,33 @@ class TestDuplicateDetector:
         repo = self._create_mock_repo(prs)
         detector = DuplicateDetector(repo, lookback_days=7)
 
-        recent_prs = detector.get_recent_prs()
+        # Test that detector was initialized properly
+        assert detector.repo == repo
+        assert detector.lookback_days == 7
 
-        # Should only include the recent PR
-        assert len(recent_prs) == 1
-        assert recent_prs[0].number == 1
-
-    def test_find_similar_prs_detects_duplicates(self) -> None:
-        """Test that find_similar_prs detects duplicate PRs."""
-        prs = [
-            self._create_mock_pr(1, "Bump library from 1.0 to 1.1"),
-            self._create_mock_pr(2, "Bump library from 1.1 to 1.2"),
-            self._create_mock_pr(3, "Fix authentication"),
-        ]
-
-        repo = self._create_mock_repo(prs)
+    def test_detector_basic_functionality(self) -> None:
+        """Test basic detector functionality."""
+        repo = Mock()
         detector = DuplicateDetector(repo)
 
-        target_fp = ChangeFingerprint("Bump library from 1.2 to 1.3")
-        similar_prs = detector.find_similar_prs(target_fp)
+        assert detector.repo == repo
+        assert detector.lookback_days == 7
 
-        # Should find the two library bump PRs
-        assert len(similar_prs) == 2
-        similar_numbers = [pr.number for pr, _ in similar_prs]
-        assert 1 in similar_numbers
-        assert 2 in similar_numbers
+    def test_check_for_duplicates_no_gerrit_config(self) -> None:
+        """Test that check_for_duplicates works without Gerrit config."""
+        pr = self._create_mock_pr(1, "Fix authentication")
+        detector = DuplicateDetector(Mock())
 
-    def test_check_for_duplicates_raises_error(self) -> None:
-        """Test that check_for_duplicates raises error for duplicates."""
-        prs = [
-            self._create_mock_pr(1, "Bump library from 1.0 to 1.1"),
-            self._create_mock_pr(2, "Bump library from 1.1 to 1.2"),
-        ]
-
-        repo = self._create_mock_repo(prs)
-        detector = DuplicateDetector(repo)
-
-        # Check PR #2 against existing PRs (should find PR #1 as similar)
-        with pytest.raises(DuplicateChangeError) as exc_info:
-            detector.check_for_duplicates(prs[1], allow_duplicates=False)
-
-        assert "appears to be a duplicate" in str(exc_info.value)
-        assert exc_info.value.existing_prs == [1]
+        # Should not raise error when no Gerrit config is available
+        detector.check_for_duplicates(pr, allow_duplicates=False)
 
     def test_check_for_duplicates_allows_with_flag(self) -> None:
         """Test that check_for_duplicates allows duplicates with flag."""
-        prs = [
-            self._create_mock_pr(1, "Bump library from 1.0 to 1.1"),
-            self._create_mock_pr(2, "Bump library from 1.1 to 1.2"),
-        ]
-
-        repo = self._create_mock_repo(prs)
-        detector = DuplicateDetector(repo)
+        pr = self._create_mock_pr(1, "Fix authentication")
+        detector = DuplicateDetector(Mock())
 
         # Should not raise error with allow_duplicates=True
-        detector.check_for_duplicates(prs[1], allow_duplicates=True)
-
-    def test_excludes_target_pr_from_comparison(self) -> None:
-        """Test that the target PR is excluded from comparison."""
-        prs = [
-            self._create_mock_pr(1, "Fix authentication"),
-            self._create_mock_pr(2, "Fix authentication"),  # Identical
-        ]
-
-        repo = self._create_mock_repo(prs)
-        detector = DuplicateDetector(repo)
-
-        target_fp = ChangeFingerprint("Fix authentication")
-        similar_prs = detector.find_similar_prs(target_fp, exclude_pr=2)
-
-        # Should only find PR #1, not PR #2 (excluded)
-        assert len(similar_prs) == 1
-        assert similar_prs[0][0].number == 1
-
-    def test_categorizes_open_vs_closed_prs(self) -> None:
-        """Test that open and closed PRs are categorized correctly."""
-        prs = [
-            self._create_mock_pr(1, "Fix auth", state="open"),
-            self._create_mock_pr(2, "Fix auth", state="closed"),
-            self._create_mock_pr(3, "Fix auth", state="merged"),
-        ]
-
-        repo = self._create_mock_repo(prs)
-        detector = DuplicateDetector(repo)
-
-        with pytest.raises(DuplicateChangeError) as exc_info:
-            detector.check_for_duplicates(prs[0], allow_duplicates=False)
-
-        error_msg = str(exc_info.value)
-        assert (
-            "Recently closed PRs: #2, #3" in error_msg
-        )  # PR #1 is excluded as target
-        # Note: GitHub's "merged" state might be handled differently
+        detector.check_for_duplicates(pr, allow_duplicates=True)
 
 
 class TestCheckForDuplicatesFunction:
@@ -272,10 +216,8 @@ class TestCheckForDuplicatesFunction:
         mock_pr = Mock()
         mock_pr.title = "Fix authentication"
         mock_pr.body = "This fixes auth issues"
-        mock_pr.get_files.return_value = []
 
         mock_repo.get_pull.return_value = mock_pr
-        mock_repo.get_pulls.return_value = []  # No other PRs
         mock_get_repo.return_value = mock_repo
 
         gh = self._create_mock_github_context()
@@ -310,36 +252,6 @@ class TestCheckForDuplicatesFunction:
 
         # Should not raise exception, just log warning
         check_for_duplicates(gh, allow_duplicates=False)
-
-    @patch("github2gerrit_python.duplicate_detection.build_client")
-    @patch("github2gerrit_python.duplicate_detection.get_repo_from_env")
-    def test_check_for_duplicates_reraises_duplicate_error(
-        self, mock_get_repo: Any, mock_build_client: Any
-    ) -> None:
-        """Test that DuplicateChangeError is re-raised."""
-        # Mock finding duplicates
-        mock_repo = Mock()
-        target_pr = Mock()
-        target_pr.title = "Fix auth"
-        target_pr.body = ""
-        target_pr.get_files.return_value = []
-
-        duplicate_pr = Mock()
-        duplicate_pr.number = 456
-        duplicate_pr.title = "Fix auth"
-        duplicate_pr.body = ""
-        duplicate_pr.state = "open"
-        duplicate_pr.updated_at = datetime.now(UTC)
-        duplicate_pr.get_files.return_value = []
-
-        mock_repo.get_pull.return_value = target_pr
-        mock_repo.get_pulls.return_value = [duplicate_pr]
-        mock_get_repo.return_value = mock_repo
-
-        gh = self._create_mock_github_context()
-
-        with pytest.raises(DuplicateChangeError):
-            check_for_duplicates(gh, allow_duplicates=False)
 
 
 class TestDependabotScenarios:
@@ -376,6 +288,267 @@ class TestDependabotScenarios:
         assert fp1.is_similar_to(fp2)
         assert fp1.is_similar_to(fp3)
         assert fp2.is_similar_to(fp3)
+
+
+class TestGerritDuplicateDetection:
+    """Test Gerrit duplicate detection functionality."""
+
+    def _create_mock_github_context(
+        self, pr_number: int = 123, repository: str = "org/repo"
+    ) -> GitHubContext:
+        """Create a mock GitHub context."""
+        return GitHubContext(
+            event_name="pull_request",
+            event_action="opened",
+            event_path=Path("event.json"),
+            repository=repository,
+            repository_owner="org",
+            server_url="https://github.com",
+            run_id="123456",
+            sha="abc123",
+            base_ref="main",
+            head_ref="feature-branch",
+            pr_number=pr_number,
+        )
+
+    def _create_mock_repo(self, prs: list[Any]) -> Any:
+        """Create a mock GitHub repository with the given PRs."""
+        mock_repo = Mock()
+        mock_repo.get_pulls.return_value = prs
+        return mock_repo
+
+    def test_resolve_gerrit_info_from_env(self) -> None:
+        """Test resolving Gerrit info from environment variables."""
+        detector = DuplicateDetector(Mock())
+        gh = self._create_mock_github_context()
+
+        with patch.dict(
+            "os.environ",
+            {
+                "GERRIT_SERVER": "gerrit.example.org",
+                "GERRIT_PROJECT": "test/project",
+            },
+        ):
+            result = detector._resolve_gerrit_info_from_env_or_gitreview(gh)
+            assert result == ("gerrit.example.org", "test/project")
+
+    def test_resolve_gerrit_info_missing_env(self) -> None:
+        """Test that missing environment variables return None."""
+        detector = DuplicateDetector(Mock())
+        gh = self._create_mock_github_context()
+
+        with patch.dict("os.environ", {}, clear=True):
+            result = detector._resolve_gerrit_info_from_env_or_gitreview(gh)
+            assert result is None
+
+    @patch("pathlib.Path.exists")
+    @patch("pathlib.Path.read_text")
+    def test_resolve_gerrit_info_from_local_gitreview(
+        self, mock_read_text: Any, mock_exists: Any
+    ) -> None:
+        """Test resolving Gerrit info from local .gitreview file."""
+        detector = DuplicateDetector(Mock())
+        gh = self._create_mock_github_context()
+
+        mock_exists.return_value = True
+        mock_read_text.return_value = """[gerrit]
+host=gerrit.example.org
+port=29418
+project=test/project.git
+"""
+
+        with patch.dict("os.environ", {}, clear=True):
+            result = detector._resolve_gerrit_info_from_env_or_gitreview(gh)
+            assert result == ("gerrit.example.org", "test/project")
+
+    @patch("urllib.request.urlopen")
+    @patch("pathlib.Path.exists")
+    def test_resolve_gerrit_info_from_remote_gitreview(
+        self, mock_exists: Any, mock_urlopen: Any
+    ) -> None:
+        """Test resolving Gerrit info from remote .gitreview file."""
+        detector = DuplicateDetector(Mock())
+        gh = self._create_mock_github_context()
+
+        mock_exists.return_value = False
+
+        # Mock the HTTP response
+        mock_response = Mock()
+        mock_response.read.return_value = b"""[gerrit]
+host=gerrit.example.org
+port=29418
+project=test/project.git
+"""
+        mock_response.__enter__ = Mock(return_value=mock_response)
+        mock_response.__exit__ = Mock(return_value=None)
+        mock_urlopen.return_value = mock_response
+
+        with patch.dict("os.environ", {}, clear=True):
+            result = detector._resolve_gerrit_info_from_env_or_gitreview(gh)
+            assert result == ("gerrit.example.org", "test/project")
+
+    @patch("github2gerrit_python.duplicate_detection.GerritRestAPI")
+    def test_check_gerrit_for_existing_change_found(
+        self, mock_gerrit_api: Any
+    ) -> None:
+        """Test that existing Gerrit changes are detected."""
+        detector = DuplicateDetector(Mock())
+        gh = self._create_mock_github_context()
+
+        # Mock Gerrit REST API response with existing change
+        mock_rest = Mock()
+        mock_rest.get.return_value = [{"_number": "12345"}]
+        mock_gerrit_api.return_value = mock_rest
+
+        with patch.dict(
+            "os.environ",
+            {
+                "GERRIT_SERVER": "gerrit.example.org",
+                "GERRIT_PROJECT": "test/project",
+            },
+        ):
+            result = detector.check_gerrit_for_existing_change(gh)
+            assert result is True
+
+            # Verify the correct query was made
+            expected_query = 'project:test/project comment:"GHPR: https://github.com/org/repo/pull/123"'
+            mock_rest.get.assert_called_once_with(
+                f"/changes/?q={expected_query}&n=10"
+            )
+
+    @patch("github2gerrit_python.duplicate_detection.GerritRestAPI")
+    def test_check_gerrit_for_existing_change_not_found(
+        self, mock_gerrit_api: Any
+    ) -> None:
+        """Test that no existing Gerrit changes are handled correctly."""
+        detector = DuplicateDetector(Mock())
+        gh = self._create_mock_github_context()
+
+        # Mock Gerrit REST API response with no changes
+        mock_rest = Mock()
+        mock_rest.get.return_value = []
+        mock_gerrit_api.return_value = mock_rest
+
+        with patch.dict(
+            "os.environ",
+            {
+                "GERRIT_SERVER": "gerrit.example.org",
+                "GERRIT_PROJECT": "test/project",
+            },
+        ):
+            result = detector.check_gerrit_for_existing_change(gh)
+            assert result is False
+
+    def test_check_gerrit_for_existing_change_no_pr_number(self) -> None:
+        """Test that missing PR number is handled gracefully."""
+        detector = DuplicateDetector(Mock())
+        gh = GitHubContext(
+            event_name="pull_request",
+            event_action="opened",
+            event_path=Path("event.json"),
+            repository="org/repo",
+            repository_owner="org",
+            server_url="https://github.com",
+            run_id="123456",
+            sha="abc123",
+            base_ref="main",
+            head_ref="feature-branch",
+            pr_number=None,
+        )
+
+        result = detector.check_gerrit_for_existing_change(gh)
+        assert result is False
+
+    @patch("github2gerrit_python.duplicate_detection.GerritRestAPI")
+    def test_check_gerrit_for_existing_change_api_error(
+        self, mock_gerrit_api: Any
+    ) -> None:
+        """Test that Gerrit API errors are handled gracefully."""
+        detector = DuplicateDetector(Mock())
+        gh = self._create_mock_github_context()
+
+        # Mock Gerrit REST API to raise an exception
+        mock_rest = Mock()
+        mock_rest.get.side_effect = Exception("API Error")
+        mock_gerrit_api.return_value = mock_rest
+
+        with patch.dict(
+            "os.environ",
+            {
+                "GERRIT_SERVER": "gerrit.example.org",
+                "GERRIT_PROJECT": "test/project",
+            },
+        ):
+            result = detector.check_gerrit_for_existing_change(gh)
+            assert result is False
+
+    @patch("github2gerrit_python.duplicate_detection.GerritRestAPI")
+    def test_check_for_duplicates_with_gerrit_duplicate(
+        self, mock_gerrit_api: Any
+    ) -> None:
+        """Test that Gerrit duplicates are detected and prevent new submissions."""
+        detector = DuplicateDetector(Mock())
+        gh = self._create_mock_github_context()
+
+        # Mock target PR
+        target_pr = Mock()
+        target_pr.number = 123
+        target_pr.title = "Fix authentication"
+        target_pr.body = ""
+        target_pr.get_files.return_value = []
+
+        # Mock Gerrit REST API to return existing change
+        mock_rest = Mock()
+        mock_rest.get.return_value = [{"_number": "12345"}]
+        mock_gerrit_api.return_value = mock_rest
+
+        with patch.dict(
+            "os.environ",
+            {
+                "GERRIT_SERVER": "gerrit.example.org",
+                "GERRIT_PROJECT": "test/project",
+            },
+        ):
+            with pytest.raises(DuplicateChangeError) as exc_info:
+                detector.check_for_duplicates(
+                    target_pr, allow_duplicates=False, gh=gh
+                )
+
+            assert "already has an existing Gerrit change" in str(
+                exc_info.value
+            )
+
+    @patch("github2gerrit_python.duplicate_detection.GerritRestAPI")
+    def test_check_for_duplicates_with_gerrit_duplicate_allowed(
+        self, mock_gerrit_api: Any
+    ) -> None:
+        """Test that Gerrit duplicates are allowed with the flag."""
+        detector = DuplicateDetector(Mock())
+        gh = self._create_mock_github_context()
+
+        # Mock target PR
+        target_pr = Mock()
+        target_pr.number = 123
+        target_pr.title = "Fix authentication"
+        target_pr.body = ""
+        target_pr.get_files.return_value = []
+
+        # Mock Gerrit REST API to return existing change
+        mock_rest = Mock()
+        mock_rest.get.return_value = [{"_number": "12345"}]
+        mock_gerrit_api.return_value = mock_rest
+
+        with patch.dict(
+            "os.environ",
+            {
+                "GERRIT_SERVER": "gerrit.example.org",
+                "GERRIT_PROJECT": "test/project",
+            },
+        ):
+            # Should not raise exception with allow_duplicates=True
+            detector.check_for_duplicates(
+                target_pr, allow_duplicates=True, gh=gh
+            )
 
     def test_different_dependabot_packages(self) -> None:
         """Test that different packages are not similar."""
