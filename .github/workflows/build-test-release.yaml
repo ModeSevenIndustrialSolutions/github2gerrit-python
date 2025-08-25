@@ -55,9 +55,20 @@ jobs:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         run: |
           TAG="${{ steps.tag-validate.outputs.tag }}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "should_promote=false" >> "$GITHUB_OUTPUT"
-            echo "Release already exists for tag $TAG, skipping promotion"
+
+          # Check if release exists and get its draft status
+          if RELEASE_INFO=$(gh release view "$TAG" --json isDraft \
+              2>/dev/null); then
+            IS_DRAFT=$(echo "$RELEASE_INFO" | jq -r '.isDraft')
+            if [ "$IS_DRAFT" = "false" ]; then
+              echo "should_promote=false" >> "$GITHUB_OUTPUT"
+              echo "Published release already exists for tag $TAG, " \
+                   "skipping promotion"
+            else
+              echo "should_promote=true" >> "$GITHUB_OUTPUT"
+              echo "Draft release exists for tag $TAG, " \
+                   "will proceed with promotion"
+            fi
           else
             echo "should_promote=true" >> "$GITHUB_OUTPUT"
             echo "No release found for tag $TAG, will proceed with promotion"
@@ -236,14 +247,42 @@ jobs:
       # yamllint disable-line rule:line-length
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
+      - name: 'Check if release is already promoted'
+        id: 'check-promoted'
+        shell: bash
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        run: |
+          TAG="${{ needs.tag-validate.outputs.tag }}"
+          if gh release view "$TAG" --json isDraft --jq '.isDraft' \
+              2>/dev/null | grep -q "false"; then
+            echo "Release $TAG is already promoted, skipping promotion"
+            echo "already_promoted=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Release $TAG is draft or doesn't exist, " \
+                 "proceeding with promotion"
+            echo "already_promoted=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 'Promote draft release'
         id: 'promote-release'
+        if: steps.check-promoted.outputs.already_promoted == 'false'
         # yamllint disable-line rule:line-length
         uses: lfreleng-actions/draft-release-promote-action@d7e7df12e32fa26b28dbc2f18a12766482785399 # v0.1.2
         with:
           token: "${{ secrets.GITHUB_TOKEN }}"
           tag: "${{ needs.tag-validate.outputs.tag }}"
           latest: true
+
+      - name: 'Set release URL for already promoted release'
+        if: steps.check-promoted.outputs.already_promoted == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        run: |
+          TAG="${{ needs.tag-validate.outputs.tag }}"
+          RELEASE_URL=$(gh release view "$TAG" --json url --jq '.url')
+          echo "release_url=$RELEASE_URL" >> "$GITHUB_OUTPUT"
 
   # Need to attach build artefacts to the release
   # This step could potentially be moved

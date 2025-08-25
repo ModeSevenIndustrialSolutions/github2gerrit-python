@@ -63,7 +63,6 @@ source = "scm"
 
 [tool.pdm.build]
 package-dir = "src"
-includes = ["github2gerrit"]
 
 [tool.pdm.dev-dependencies]
 dev = [
@@ -161,3 +160,8 @@ testpaths = ["tests"]
 # No extra settings are required here; this stanza reserves the
 # namespace for future use if needed.
 managed = true
+
+[dependency-groups]
+dev = [
+    "build>=1.3.0",
+]
