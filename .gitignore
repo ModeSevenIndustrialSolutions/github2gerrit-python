@@ -63,5 +63,8 @@ MANIFEST
 .conda*/
 .python-version
 
+# PDM local packages (PEP 582)
+__pypackages__/
+
 # Node
 node_modules/*
