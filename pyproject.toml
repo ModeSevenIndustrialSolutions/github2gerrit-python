@@ -20,6 +20,7 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Software Development :: Build Tools",
   "Topic :: Software Development :: Version Control",
@@ -40,9 +41,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/lfit/github2gerrit"
-Repository = "https://github.com/lfit/github2gerrit"
-Issues = "https://github.com/lfit/github2gerrit/issues"
+Homepage = "https://github.com//lfreleng-actions/github2gerrit"
+Repository = "https://github.com//lfreleng-actions/github2gerrit"
+Issues = "https://github.com//lfreleng-actions/github2gerrit/issues"
 
 [project.scripts]
 github2gerrit = "github2gerrit.cli:app"
